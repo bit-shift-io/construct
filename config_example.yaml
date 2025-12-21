@@ -1,0 +1,47 @@
+# Copy this to data/config.yaml and fill in your credentials.
+
+# Root directory for new projects (optional)
+system:
+  projects_dir: "/home/bronson/Projects"
+
+# Agents configuration
+agents:
+  # gemini_cli:
+  #   model: "gemini-1.5-flash"
+  #   # Requires GEMINI_API_KEY environment variable
+  
+  # claude_cli:
+  #   model: "claude-3-5-sonnet-20241022"
+  #   # Requires ANTHROPIC_API_KEY environment variable
+
+  # copilot_cli:
+  #   command: "github-copilot-cli" # Copilot still uses CLI wrapper
+  #   model: "gpt-4"
+
+services:
+  matrix:
+    username: "@bot:matrix.org"
+    password: "your_password"
+    homeserver: "https://matrix.org"
+    display_name: "Agent Matrix" # Optional: The bot's display name
+    protocol: "matrix" # Optional, defaults to empty string
+
+# Bridges connect Matrix channels to external services or agent workflows
+bridges:
+  "Development":
+    - service: "matrix"
+      channel: "!room_id_1:matrix.org"
+    - service: "google_cli"
+  "Staging":
+    - service: "matrix"
+      channel: "!room_id_2:matrix.org"
+
+# Allowed commands for the bot to execute via shell
+# The 'agent' command is used for .task and .modify workflows
+commands:
+  allowed:
+    agent: "aichat" # Command binary for AI interaction
+    ls: "ls -R"
+    echo: "echo"
+    rebuild: "cargo build"
+    deploy: "docker compose up -d --build"

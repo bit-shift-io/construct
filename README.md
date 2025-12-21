@@ -1,0 +1,69 @@
+# 🤖 Construct
+
+**Construct** is a powerful infinite workspace designed to orchestrate AI agents for complex coding tasks. It serves as your loading program, allowing you to spawn agents, execute plans, and manage workflows directly from a chat room.
+
+## ✨ Features
+
+- **🧩 Modular Architecture**: Clean separation between configuration, state, and coordination logic.
+- **🗺️ Multi-Room & Multi-Agent**: Manage multiple project bridges and agent workflows simultaneously.
+- **🤝 Generic Agent Interface**: Support for `gemini`, `claude`, and `aichat` agents with asynchronous execution and progress reporting.
+- **📝 Task-Driven Workflow**: Initiate tasks, generate plans, refine them with feedback, and execute them.
+- **🛠️ Integrated DevOps**: Built-in support for Git operations (`commit`, `diff`, `discard`) and custom build/deploy commands.
+- **📂 File Management**: Inspect project files directly from the chat.
+- **⚡ Extensible**: Easily add new agent backends or custom shell commands via configuration.
+
+## 🚀 Getting Started
+
+### Prerequisites
+- [Rust](https://www.rust-lang.org/tools/install) (latest stable)
+- A Matrix account for the bot.
+- **AI Configuration**:
+  - **Gemini**: Requires `GEMINI_API_KEY` environment variable.
+  - **Claude**: Requires `ANTHROPIC_API_KEY` environment variable.
+  - **GitHub Copilot**: Install `github-copilot-cli` (still uses CLI wrapper).
+  - **AIChat**: Install `aichat` for a versatile, multi-backend fallback.
+
+### Installation
+1.  Clone the repository.
+2.  Create a `data` directory: `mkdir data`.
+3.  Copy `config_example.yaml` to `data/config.yaml`.
+4.  Configure your Matrix credentials and agents in `data/config.yaml`.
+5.  Set your API keys (e.g., `export GEMINI_API_KEY=...`)
+6.  Run the bot: `cargo run`.
+
+## 🎮 Commands
+
+### Project Management
+- `.list`: List available projects in the configured projects directory.
+- `.set project <path>`: Set the active project directory.
+- `.set agent <name>`: Set the active AI agent for the room (e.g., `gemini`, `claude`, `copilot`).
+- `.agents`: List available agents configured in the bot.
+- `.status`: Show current bot state (active project, current task, active agent).
+- `.read <file>`: View the content of a file.
+- `.new`: Clear the current task state to start fresh.
+
+### Task Workflow
+- `.task <desc>`: State a goal and generate a `plan.md` using the active agent.
+- `.modify <feedback>`: Provide feedback to refine an existing plan.
+- `.approve`: Execute the approved plan and generate a `walkthrough.md`.
+- `.ask <msg>`: Ask a question to the active agent without starting a formal task.
+- `.reject`: Clear the current plan and task.
+
+### Git & DevOps
+- `.changes`: View current `git diff`.
+- `.commit <message>`: Stage all files and commit with the specified message.
+- `.discard`: Revert all uncommitted changes.
+- `.rebuild`: Execute the configured rebuild command.
+- `.deploy`: Execute the configured deployment command.
+
+## 🛠️ Configuration
+
+Configure the bot via `data/config.yaml`. You can define:
+- **System**: Base `projects_dir` for easy listing and navigation.
+- **Matrix**: Credentials and homeserver URL.
+- **Agents**: Define active agents (`gemini_cli`, `claude_cli`, `copilot_cli`) and their models.
+- **Bridges**: Connecting specific Matrix channels to initial project contexts.
+- **Commands**: Allowed shell commands and default agent binary.
+
+## 📄 License
+MIT
