@@ -2,14 +2,14 @@
 
 # Root directory for new projects (optional)
 system:
-  projects_dir: "/home/bronson/Projects"
+  projects_dir: "/home/bob/Projects"
 
 # Agents configuration
 agents:
   # gemini_cli:
   #   model: "gemini-1.5-flash"
   #   # Requires GEMINI_API_KEY environment variable
-  
+
   # claude_cli:
   #   model: "claude-3-5-sonnet-20241022"
   #   # Requires ANTHROPIC_API_KEY environment variable
@@ -40,7 +40,6 @@ bridges:
 # The 'agent' command is used for .task and .modify workflows
 commands:
   allowed:
-    agent: "aichat" # Command binary for AI interaction
     ls: "ls -R"
     echo: "echo"
     rebuild: "cargo build"

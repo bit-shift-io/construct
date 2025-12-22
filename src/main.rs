@@ -1,10 +1,11 @@
 #![recursion_limit = "256"]
 
-mod config;
-mod state;
 mod agent;
 mod bridge;
 mod commands;
+mod config;
+mod state;
+mod util;
 
 use anyhow::{Context, Result};
 use matrix_sdk::{
@@ -23,9 +24,9 @@ use std::fs;
 use std::sync::{Arc, OnceLock};
 use tokio::sync::Mutex;
 
+use crate::bridge::BridgeManager;
 use crate::config::AppConfig;
 use crate::state::BotState;
-use crate::bridge::BridgeManager;
 
 /// Static configuration and state managers.
 /// Using OnceLock for safe global access.
@@ -44,11 +45,14 @@ async fn main() -> Result<()> {
     // 2. Initialize global state and manager
     let state = Arc::new(Mutex::new(BotState::load()));
     let bridge_manager = Arc::new(BridgeManager::new(config.clone(), state.clone()));
-    
+
     CONFIG.set(config.clone()).ok();
     BRIDGE_MANAGER.set(bridge_manager).ok();
 
-    println!("Loaded configuration for user: {}", config.services.matrix.username);
+    println!(
+        "Loaded configuration for user: {}",
+        config.services.matrix.username
+    );
 
     // 3. Setup Matrix Client
     let client = Client::builder()
@@ -78,8 +82,10 @@ async fn main() -> Result<()> {
 
     // 6. Register Event Handlers
     // Invitations: handled locally in main or moved to bridge if needed
-    client.add_event_handler(|ev: StrippedRoomMemberEvent, room: Room| async move { handle_invites(ev, room).await });
-    
+    client.add_event_handler(|ev: StrippedRoomMemberEvent, room: Room| async move {
+        handle_invites(ev, room).await
+    });
+
     // Messages: delegated to BridgeManager
     client.add_event_handler(|ev: SyncRoomMessageEvent, room: Room| async move {
         if let Some(manager) = BRIDGE_MANAGER.get() {
@@ -116,40 +122,46 @@ async fn setup_bridges(client: &Client, config: &AppConfig, state: Arc<Mutex<Bot
             if entry.service == "matrix" {
                 if let Some(room_id_str) = &entry.channel {
                     println!("Bridge [{}]: Joining room {}...", bridge_name, room_id_str);
-                    
+
                     if let Ok(room_id) = RoomId::parse(room_id_str) {
                         if let Err(e) = client.join_room_by_id(&room_id).await {
                             eprintln!("   Failed to join room {}: {}", room_id_str, e);
                         } else if let Some(room) = client.get_room(&room_id) {
                             println!("   Successfully joined room {}.", room_id_str);
-                            
+
                             let mut bot_state = state.lock().await;
                             let room_state = bot_state.get_room_state(room_id.as_str());
-                            
-                            let current_project_full = room_state.current_project_path.clone().unwrap_or_else(|| "None".to_string());
-                            let project_name = if current_project_full == "None" {
-                                "None"
-                            } else {
-                                current_project_full.split('/').last().unwrap_or(&current_project_full)
-                            };
+
+                            let current_project_full = room_state
+                                .current_project_path
+                                .clone()
+                                .unwrap_or_else(|| "None".to_string());
+                            let project_name = crate::util::get_project_name(&current_project_full);
 
                             let active_agent_opt = room_state.active_agent.as_ref();
-                            let resolved_agent = crate::commands::resolve_agent_name(active_agent_opt, config);
-                            
+                            let resolved_agent =
+                                crate::commands::resolve_agent_name(active_agent_opt, config);
+
                             let active_model = match room_state.active_model.as_deref() {
                                 Some(m) if m == "default" => "auto",
                                 Some(m) => m,
                                 None => "auto",
                             };
-                            
-                            let bot_name = config.services.matrix.display_name.as_deref()
+
+                            let bot_name = config
+                                .services
+                                .matrix
+                                .display_name
+                                .as_deref()
                                 .or(client.user_id().map(|u| u.localpart()))
                                 .unwrap_or("Bot");
 
-                            let help_text = format!("{} online, use .help to list commands.\nProject: {}\nAgent: {} | {}", 
-                                bot_name, project_name, resolved_agent, active_model);
-                            
-                            let _ = room.send(matrix_sdk::ruma::events::room::message::RoomMessageEventContent::text_plain(help_text)).await;
+                            let help_text = format!(
+                                "**{}** is ready for assignment...\nUse `.help` to list commands.\n\n**Project**: `{}`\n**Agent**: `{}` | `{}`",
+                                bot_name, project_name, resolved_agent, active_model
+                            );
+
+                            let _ = room.send(matrix_sdk::ruma::events::room::message::RoomMessageEventContent::text_markdown(help_text)).await;
                         }
                     }
                 }
