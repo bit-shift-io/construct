@@ -2,6 +2,32 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum WizardStep {
+    ProjectName,
+    ProjectType, // App, Lib, etc.
+    Stack,       // Language/Framework
+    Description, // Accumulate (Project)
+    Confirmation,
+    TaskDescription, // Accumulate (Task)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub enum WizardMode {
+    #[default]
+    Project,
+    Task,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct WizardState {
+    pub active: bool,
+    pub mode: WizardMode,
+    pub step: Option<WizardStep>,
+    pub data: HashMap<String, String>,
+    pub buffer: String, // For multi-message input
+}
+
 /// State for a single chat room.
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct RoomState {
@@ -14,6 +40,12 @@ pub struct RoomState {
     pub stop_requested: bool,
     #[serde(default)]
     pub last_model_list: Vec<String>,
+    #[serde(default)]
+    pub is_task_completed: bool,
+    #[serde(default)]
+    pub wizard: WizardState,
+    #[serde(default)]
+    pub model_cooldowns: HashMap<String, i64>, // "agent:model" -> timestamp
 }
 
 /// Persistent state of the bot, mapping Room IDs to their respective room states.

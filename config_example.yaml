@@ -3,6 +3,8 @@
 # Root directory for new projects (optional)
 system:
   projects_dir: "/home/bob/Projects"
+  admin:
+    - "@bob:matrix.org"
 
 # Agents configuration
 agents:
@@ -36,11 +38,17 @@ bridges:
     - service: "matrix"
       channel: "!room_id_2:matrix.org"
 
-# Allowed commands for the bot to execute via shell
-# The 'agent' command is used for .task and .modify workflows
+# Command permissions and sandbox
 commands:
+  default: "ask" # "ask", "allow", "block"
+  ask:
+    - "sudo"
   allowed:
-    ls: "ls -R"
-    echo: "echo"
-    rebuild: "cargo build"
-    deploy: "docker compose up -d --build"
+    - "ls"
+    - "cat"
+    - "grep"
+    - "cd"
+    - "pwd"
+    - "git"
+  blocked:
+    - "su"

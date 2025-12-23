@@ -1,11 +1,14 @@
 #![recursion_limit = "256"]
 
 mod agent;
+mod admin;
 mod bridge;
 mod commands;
 mod config;
+mod sandbox;
 mod state;
 mod util;
+mod wizard;
 
 use anyhow::{Context, Result};
 use matrix_sdk::{
@@ -129,39 +132,8 @@ async fn setup_bridges(client: &Client, config: &AppConfig, state: Arc<Mutex<Bot
                         } else if let Some(room) = client.get_room(&room_id) {
                             println!("   Successfully joined room {}.", room_id_str);
 
-                            let mut bot_state = state.lock().await;
-                            let room_state = bot_state.get_room_state(room_id.as_str());
-
-                            let current_project_full = room_state
-                                .current_project_path
-                                .clone()
-                                .unwrap_or_else(|| "None".to_string());
-                            let project_name = crate::util::get_project_name(&current_project_full);
-
-                            let active_agent_opt = room_state.active_agent.as_ref();
-                            let resolved_agent =
-                                crate::commands::resolve_agent_name(active_agent_opt, config);
-
-                            let active_model = match room_state.active_model.as_deref() {
-                                Some(m) if m == "default" => "auto",
-                                Some(m) => m,
-                                None => "auto",
-                            };
-
-                            let bot_name = config
-                                .services
-                                .matrix
-                                .display_name
-                                .as_deref()
-                                .or(client.user_id().map(|u| u.localpart()))
-                                .unwrap_or("Bot");
-
-                            let help_text = format!(
-                                "**{}** is ready for assignment...\nUse `.help` to list commands.\n\n**Project**: `{}`\n**Agent**: `{}` | `{}`",
-                                bot_name, project_name, resolved_agent, active_model
-                            );
-
-                            let _ = room.send(matrix_sdk::ruma::events::room::message::RoomMessageEventContent::text_markdown(help_text)).await;
+                             // Send status message instead of welcome message
+                             crate::commands::handle_status(state.clone(), &room).await;
                         }
                     }
                 }

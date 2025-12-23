@@ -36,3 +36,28 @@ pub async fn run_command(command: &str, folder: Option<&str>) -> Result<String, 
         }
     }
 }
+
+/// Helper to run a raw shell command using `sh -c`.
+/// This allows for pipes, redirects, and other shell features.
+pub async fn run_shell_command(command: &str, folder: Option<&str>) -> Result<String, String> {
+    use tokio::process::Command;
+
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .current_dir(folder.unwrap_or("."))
+        .output()
+        .await
+        .map_err(|e| format!("Failed to run shell command: {}", e))?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        let err = String::from_utf8_lossy(&output.stderr).to_string();
+        if !err.is_empty() {
+            Err(err)
+        } else {
+            Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        }
+    }
+}

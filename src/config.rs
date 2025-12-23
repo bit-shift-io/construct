@@ -10,9 +10,25 @@ pub struct AppConfig {
     pub agents: AgentsConfig,
     #[serde(default)]
     pub bridges: HashMap<String, Vec<BridgeEntry>>,
-    pub commands: HashMap<String, HashMap<String, String>>,
+    pub commands: CommandsConfig,
     #[serde(default)]
     pub system: SystemConfig,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct CommandsConfig {
+    #[serde(default = "default_command_mode")]
+    pub default: String,
+    #[serde(default)]
+    pub ask: Vec<String>,
+    #[serde(default)]
+    pub allowed: Vec<String>,
+    #[serde(default)]
+    pub blocked: Vec<String>,
+}
+
+fn default_command_mode() -> String {
+    "ask".to_string()
 }
 
 /// System-level settings for the bot.
@@ -20,6 +36,8 @@ pub struct AppConfig {
 pub struct SystemConfig {
     #[serde(default)]
     pub projects_dir: Option<String>,
+    #[serde(default)]
+    pub admin: Vec<String>,
 }
 
 /// Represents a specific bridge entry connecting a service to a channel.
@@ -49,6 +67,10 @@ pub struct AgentConfig {
     pub api_key: Option<String>,
     #[serde(default)]
     pub api_key_env: Option<String>, // e.g. "GEMINI_API_KEY"
+    #[serde(default)]
+    pub models: Option<Vec<String>>, // List of models to cycle through
+    #[serde(default)]
+    pub fallback_agent: Option<String>, // Agent to switch to if all models fail
 }
 
 /// Specific configuration for the Matrix service.

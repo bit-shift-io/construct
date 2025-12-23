@@ -7,15 +7,190 @@ use std::fs;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use chrono; // Ensure chrono is available
+
+/// Helper to execute an agent with fallback logic for "Out of usage" errors.
+async fn execute_with_fallback(
+    config: &AppConfig,
+    state: Arc<Mutex<BotState>>,
+    room: &Room,
+    mut context: AgentContext,
+    initial_agent_name: &str,
+) -> Result<String, String> {
+    let mut current_agent_name = initial_agent_name.to_string();
+    let mut current_model = context.model.clone();
+
+    // Safety break to prevent infinite loops
+    let mut attempts = 0;
+    const MAX_ATTEMPTS: usize = 10;
+
+    loop {
+        attempts += 1;
+        if attempts > MAX_ATTEMPTS {
+            return Err("Maximum fallback attempts reached.".to_string());
+        }
+
+        let agent = get_agent(&current_agent_name, config);
+
+        // Update context with current model (might have changed in loop)
+        context.model = current_model.clone();
+
+        let result = agent.execute(&context).await;
+
+        match result {
+            Ok(output) => return Ok(output),
+            Err(err) => {
+                // Check if error is related to usage/quota/rate limits
+                let err_lower = err.to_lowercase();
+                if err_lower.contains("out of usage") 
+                    || err_lower.contains("quota") 
+                    || err_lower.contains("rate limit") 
+                    || err_lower.contains("429") 
+                    || err_lower.contains("insufficient") {
+                    
+                    let mut bot_state = state.lock().await;
+                    let room_state = bot_state.get_room_state(room.room_id().as_str());
+
+                    // Get config for current agent to resolve default model if needed
+                    let agent_conf = config.agents.get(&current_agent_name);
+                    
+                    // Resolve ACTUAL model name for cooldown key
+                    // If current_model is None, we need to know what the agent actually used (its default)
+                    let resolved_model_name = current_model.clone().or_else(|| {
+                        agent_conf.map(|c| c.model.clone())
+                    }).unwrap_or_else(|| "default".to_string());
+
+                    // Record Cooldown using the RESOLVED name
+                    let cooldown_key = format!(
+                        "{}:{}",
+                        current_agent_name,
+                        resolved_model_name
+                    );
+                    
+                    let now = chrono::Utc::now().timestamp();
+                    room_state.model_cooldowns.insert(cooldown_key, now);
+                    // Clean up old cooldowns (older than 1 hour)
+                    room_state.model_cooldowns.retain(|_, ts| now - *ts < 3600);
+
+                    if let Some(agent_conf) = agent_conf {
+                        // 1. Try next model in list
+                        let models_list = if let Some(models) = &agent_conf.models {
+                            if !models.is_empty() {
+                                Some(models.clone())
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+
+                        // Filter out models in cooldown
+                        let next_model = if let Some(models) = models_list {
+                            // Find current index to start searching from
+                            let start_idx = models
+                                .iter()
+                                .position(|m| m == &resolved_model_name)
+                                .map(|i| i + 1)
+                                .unwrap_or(0);
+
+                            let mut found = None;
+                            // Search forward from current
+                            for i in start_idx..models.len() {
+                                let candidate = &models[i];
+                                let key = format!("{}:{}", current_agent_name, candidate);
+
+                                // Check cooldown
+                                if let Some(ts) = room_state.model_cooldowns.get(&key) {
+                                    if now - *ts < 3600 {
+                                        continue;
+                                    }
+                                }
+                                found = Some(candidate.clone());
+                                break;
+                            }
+                            
+                            // If we started mid-list and didn't find one, wrap around and search from 0 to start_idx
+                            if found.is_none() && start_idx > 0 {
+                                for i in 0..start_idx {
+                                    let candidate = &models[i];
+                                    // Avoid selecting the one we just failed on (resolved_model_name) if it's in the list
+                                    if candidate == &resolved_model_name {
+                                        continue;
+                                    }
+                                    
+                                    let key = format!("{}:{}", current_agent_name, candidate);
+                                    if let Some(ts) = room_state.model_cooldowns.get(&key) {
+                                        if now - *ts < 3600 {
+                                            continue;
+                                        }
+                                    }
+                                    found = Some(candidate.clone());
+                                    break;
+                                }
+                            }
+
+                            found
+                        } else {
+                            None
+                        };
+
+                        if let Some(next) = next_model {
+                            let msg = format!(
+                                "⚠️ Provider Error: {} \n🔄 Switching model: {} -> {}",
+                                err,
+                                resolved_model_name,
+                                next
+                            );
+                            // Notify
+                            let _ = room.send(RoomMessageEventContent::text_plain(&msg)).await;
+
+                            // Update state
+                            room_state.active_model = Some(next.clone());
+                            current_model = Some(next);
+
+                            // Continue loop
+                            continue;
+                        }
+
+                        // 2. Fallback Agent
+                        if let Some(fallback) = &agent_conf.fallback_agent {
+                            let msg = format!(
+                                "⚠️ Provider Error: {} \n🔄 Switching Agent: {} -> {}",
+                                err, current_agent_name, fallback
+                            );
+                            let _ = room.send(RoomMessageEventContent::text_plain(&msg)).await;
+
+                            // Update state
+                            room_state.active_agent = Some(fallback.clone());
+                            room_state.active_model = None; // Reset model for new agent
+
+                            current_agent_name = fallback.clone();
+                            current_model = None;
+                            continue;
+                        }
+                    }
+                }
+
+                // If not handled or other error, return it
+                return Err(err);
+            }
+        }
+    }
+}
+
 /// Displays help text with available commands.
 /// Displays help text with available commands.
 /// Displays help text with available commands.
-pub async fn handle_help(config: &AppConfig, state: Arc<Mutex<BotState>>, room: &Room) {
+/// Displays help text with available commands.
+pub async fn handle_help(
+    _config: &AppConfig,
+    state: Arc<Mutex<BotState>>,
+    room: &Room,
+    is_admin: bool,
+) {
     let mut bot_state = state.lock().await;
     let room_state = bot_state.get_room_state(room.room_id().as_str());
-    let current_project_full = room_state.current_project_path.as_deref().unwrap_or("None");
-
-    let project_name = crate::util::get_project_name(current_project_full);
+    let _current_project_full = room_state.current_project_path.as_deref().unwrap_or("None");
 
     let mut response = String::from("**🤖 Construct Help**\n");
     response.push_str("Usage: .command _args_\n\n");
@@ -45,13 +220,15 @@ pub async fn handle_help(config: &AppConfig, state: Arc<Mutex<BotState>>, room: 
     response.push_str("* build: Run build\n");
     response.push_str("* deploy: Run deploy\n\n");
 
-    response.push_str("**⚡ Custom Commands**\n");
-
-    if let Some(allowed) = config.commands.get("allowed") {
-        for key in allowed.keys() {
-            response.push_str(&format!("* {}\n", key));
-        }
+    if is_admin {
+        response.push_str("**⚡ Admin**\n");
+        response.push_str("* , [cmd]: Terminal command\n");
     }
+
+    // Dont want to list allowed commands from new config
+    //for key in &config.commands.allowed {
+    //    response.push_str(&format!("* {}\n", key));
+    //}
 
     let content = RoomMessageEventContent::text_markdown(response);
     let _ = room.send(content).await;
@@ -93,10 +270,19 @@ pub async fn handle_project(
         let state = bot_state.get_room_state(room_id);
         state.current_project_path = Some(final_path.clone());
         bot_state.save();
+
+        let projects_root = config
+            .system
+            .projects_dir
+            .clone()
+            .unwrap_or_else(|| ".".to_string());
+        let sandbox = crate::sandbox::Sandbox::new(projects_root);
+        let display_path = sandbox.virtualize_output(&final_path);
+
         let _ = room
             .send(RoomMessageEventContent::text_markdown(format!(
                 "✅ **Project set to**: `{}`",
-                final_path
+                display_path
             )))
             .await;
     }
@@ -378,9 +564,33 @@ pub async fn handle_model(state: Arc<Mutex<BotState>>, argument: &str, room: &Ro
     bot_state.save();
 }
 
-/// Resets the active task for the current room.
-/// If an argument is provided, creates a new project directory and sets it as the working directory.
+/// Entry point for .new command. STARTS the wizard if not internal.
 pub async fn handle_new(
+    config: &AppConfig,
+    state: Arc<Mutex<BotState>>,
+    argument: &str,
+    room: &Room,
+) {
+    let wizard_active = {
+        let mut bot_state = state.lock().await;
+        let room_state = bot_state.get_room_state(room.room_id().as_str());
+        room_state.wizard.active
+    };
+
+    if !wizard_active {
+        let name_arg = if argument.is_empty() {
+            None
+        } else {
+            Some(argument.to_string())
+        };
+        crate::wizard::start_wizard(state.clone(), room, name_arg).await;
+        return;
+    }
+
+    create_new_project(config, state, argument, room).await;
+}
+
+pub async fn create_new_project(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
     argument: &str,
@@ -403,10 +613,15 @@ pub async fn handle_new(
         // Attempt to create the directory
         match fs::create_dir_all(&final_path) {
             Ok(_) => {
+                // Initialize Project Documentation
+                let _ = fs::write(format!("{}/roadmap.md", final_path), "# Project Roadmap\n\n- [ ] Initial Setup");
+                let _ = fs::write(format!("{}/architecture.md", final_path), "# System Architecture\n\nTo be defined.");
+                let _ = fs::write(format!("{}/changelog.md", final_path), "# Changelog\n\n## Unreleased");
+
                 let room_state = bot_state.get_room_state(room.room_id().as_str());
                 room_state.current_project_path = Some(final_path.clone());
                 response.push_str(&format!(
-                    "\n📂 **Created and set project directory to**: `{}`",
+                    "\n📂 **Created and set project directory to**: `{}`\n📄 **Initialized specs**: `roadmap.md`, `architecture.md`, `changelog.md`",
                     final_path
                 ));
             }
@@ -421,6 +636,8 @@ pub async fn handle_new(
 
     let room_state = bot_state.get_room_state(room.room_id().as_str());
     room_state.active_task = None;
+    room_state.is_task_completed = false;
+    room_state.execution_history = None;
     bot_state.save();
 
     response.push_str("\n\nUse `.task` to start a new workflow.");
@@ -435,10 +652,7 @@ pub fn resolve_agent_name(active_agent: Option<&String>, config: &AppConfig) -> 
         return agent.clone();
     }
 
-    // Check for explicit default in allowed commands
-    if let Some(agent) = config.commands.get("allowed").and_then(|m| m.get("agent")) {
-        return agent.clone();
-    }
+    // Defaulting to smart detection if no explicit agent is active
 
     // Smart Fallbacks based on configured services
     // Smart Fallbacks based on configured services - Updated for HashMap
@@ -462,9 +676,24 @@ pub async fn handle_task(
     argument: &str,
     room: &Room,
 ) {
+    if argument.is_empty() {
+        let wizard_active = {
+            let mut bot_state = state.lock().await;
+            let room_state = bot_state.get_room_state(room.room_id().as_str());
+            room_state.wizard.active
+        };
+
+        if !wizard_active {
+            crate::wizard::start_task_wizard(state.clone(), room).await;
+            return;
+        }
+    }
+
     let mut bot_state = state.lock().await;
     let room_state = bot_state.get_room_state(room.room_id().as_str());
     room_state.active_task = Some(argument.to_string());
+    room_state.is_task_completed = false;
+    room_state.execution_history = None;
 
     let working_dir = room_state.current_project_path.clone();
     let active_agent = room_state.active_agent.clone();
@@ -472,6 +701,7 @@ pub async fn handle_task(
 
     // Crucial: Drop state reference before saving to avoid borrow conflict
     bot_state.save();
+    drop(bot_state);
 
     let task_desc = argument.to_string();
     let room_clone = room.clone();
@@ -486,21 +716,55 @@ pub async fn handle_task(
             .await;
 
         let system_prompt = fs::read_to_string("system_prompt.md").unwrap_or_default();
+        
+        // Read Project Context and Detect New Project
+        let mut project_context = String::new();
+        let mut is_new_project = false;
+
+        if let Some(wd) = &working_dir {
+            if let Ok(roadmap) = fs::read_to_string(format!("{}/roadmap.md", wd)) {
+                if roadmap.contains("- [ ] Initial Setup") {
+                    is_new_project = true;
+                }
+                project_context.push_str(&format!("\n\n### Project Roadmap (Context Only)\n{}\n", roadmap));
+            }
+            if let Ok(arch) = fs::read_to_string(format!("{}/architecture.md", wd)) {
+                project_context.push_str(&format!("\n\n### Architecture (Context Only)\n{}\n", arch));
+            }
+        }
+
+        let mut instructions = String::from("1. Use the 'Project Roadmap' and 'Architecture' above for understanding the big picture and constraints.\n2. Your scope is STRICTLY limited to the 'Task' described above. Do NOT try to complete other roadmap items.\n3. Generate two files:\n   - `plan.md`: A detailed technical plan for THIS specific task.\n   - `tasks.md`: A checklist of the subtasks for THIS specific task.");
+
+        let mut return_format = String::from("plan.md\n```markdown\n...content...\n```\n\ntasks.md\n```markdown\n...content...\n```");
+
+        if is_new_project {
+             instructions.push_str("\n4. **NEW PROJECT DETECTED**: You MUST also generate `roadmap.md` and `architecture.md` based on the task requirements to replace the default placeholders.");
+             return_format.push_str("\n\nroadmap.md\n```markdown\n...content...\n```\n\narchitecture.md\n```markdown\n...content...\n```");
+        }
+
         let prompt = format!(
-            "{}\n\nTask: {}\n\nPlease generate two files:\n1. `plan.md`: A detailed technical plan.\n2. `tasks.md`: A checklist of the tasks.\n\nIMPORTANT: Return the content of each file in a separate code block. Precede each code block with the filename (e.g., `plan.md` or `tasks.md`) so I can distinguish them. format:\n\nplan.md\n```markdown\n...content...\n```\n\ntasks.md\n```markdown\n...content...\n```",
-            system_prompt, task_desc
+            "{}\n{}\n\nTask: {}\n\nINSTRUCTIONS:\n{}\n\nIMPORTANT: Return the content of each file in a separate code block. Precede each code block with the filename. format:\n\n{}",
+            system_prompt, project_context, task_desc, instructions, return_format
         );
 
         let agent_name = resolve_agent_name(active_agent.as_ref(), &config_clone);
 
-        let agent = get_agent(&agent_name, &config_clone);
         let context = AgentContext {
             prompt,
             working_dir: working_dir.clone(),
             model: active_model,
         };
 
-        match agent.execute(&context).await {
+        let result = execute_with_fallback(
+            &config_clone,
+            state.clone(),
+            &room_clone,
+            context,
+            &agent_name,
+        )
+        .await;
+
+        match result {
             Ok(output) => {
                 let _ = room_clone
                     .send(RoomMessageEventContent::text_markdown(
@@ -565,10 +829,27 @@ pub async fn handle_task(
                     }
                 }
 
+                // Check for extra files if new project
+                let mut extra_msg = String::new();
+                if let Some(roadmap) = parse_file("roadmap.md", &output) {
+                     if let Some(wd) = &working_dir {
+                         let _ = fs::write(format!("{}/roadmap.md", wd), &roadmap);
+                         extra_msg.push_str("\n### Roadmap Updated\n");
+                         extra_msg.push_str(&roadmap);
+                     }
+                }
+                if let Some(arch) = parse_file("architecture.md", &output) {
+                     if let Some(wd) = &working_dir {
+                         let _ = fs::write(format!("{}/architecture.md", wd), &arch);
+                         extra_msg.push_str("\n### Architecture Updated\n");
+                         extra_msg.push_str(&arch);
+                     }
+                }
+
                 let _ = room_clone
                     .send(RoomMessageEventContent::text_markdown(format!(
-                        "### Plan\n\n{}\n\n### Tasks generated.",
-                        plan_content
+                        "### Plan\n\n{}\n\n### Tasks generated.{}\n",
+                        plan_content, extra_msg
                     )))
                     .await;
             }
@@ -597,7 +878,7 @@ pub async fn handle_modify(
         Some(t) => t.clone(),
         None => {
             let _ = room
-                .send(RoomMessageEventContent::text_plain(
+                .send(RoomMessageEventContent::text_markdown(
                     "⚠️ No active task to modify. Use `.task` first.",
                 ))
                 .await;
@@ -611,6 +892,8 @@ pub async fn handle_modify(
     let feedback = argument.to_string();
     let room_clone = room.clone();
     let config_clone = config.clone();
+
+    drop(bot_state);
 
     tokio::spawn(async move {
         let _ = room_clone
@@ -635,18 +918,26 @@ pub async fn handle_modify(
 
         let agent_name = resolve_agent_name(active_agent.as_ref(), &config_clone);
 
-        let agent = get_agent(&agent_name, &config_clone);
         let context = AgentContext {
             prompt,
             working_dir: working_dir.clone(),
             model: active_model,
         };
 
-        match agent.execute(&context).await {
+        let result = execute_with_fallback(
+            &config_clone,
+            state.clone(),
+            &room_clone,
+            context,
+            &agent_name,
+        )
+        .await;
+
+        match result {
             Ok(output) => {
                 if let Err(e) = fs::write(&plan_path, &output) {
                     let _ = room_clone
-                        .send(RoomMessageEventContent::text_plain(format!(
+                        .send(RoomMessageEventContent::text_markdown(format!(
                             "⚠️ Failed to write updated plan.md: {}",
                             e
                         )))
@@ -687,7 +978,6 @@ async fn run_interactive_loop(
 
     // Resolve tools once
     let agent_name = resolve_agent_name(active_agent.as_ref(), &config);
-    let agent = get_agent(&agent_name, &config);
     let system_prompt = fs::read_to_string("system_prompt.md").unwrap_or_default();
     let room_clone = room.clone();
 
@@ -700,7 +990,7 @@ async fn run_interactive_loop(
                 room_state.stop_requested = false;
                 bot_state.save();
                 let _ = room_clone
-                    .send(RoomMessageEventContent::text_plain(
+                    .send(RoomMessageEventContent::text_markdown(
                         "🛑 **Execution stopped by user.**",
                     ))
                     .await;
@@ -711,7 +1001,7 @@ async fn run_interactive_loop(
         step_count += 1;
         if step_count > max_steps {
             let _ = room_clone
-                .send(RoomMessageEventContent::text_plain(
+                .send(RoomMessageEventContent::text_markdown(
                     "⚠️ **Limit Reached**: Stopped to prevent infinite loop.",
                 ))
                 .await;
@@ -738,7 +1028,10 @@ async fn run_interactive_loop(
 
         let _ = room_clone.typing_notice(true).await;
 
-        match agent.execute(&context).await {
+        let result =
+            execute_with_fallback(&config, state.clone(), &room_clone, context, &agent_name).await;
+
+        match result {
             Ok(response) => {
                 let _ = room_clone.typing_notice(false).await;
 
@@ -750,7 +1043,7 @@ async fn run_interactive_loop(
                         room_state.stop_requested = false;
                         bot_state.save();
                         let _ = room_clone
-                            .send(RoomMessageEventContent::text_plain(
+                            .send(RoomMessageEventContent::text_markdown(
                                 "🛑 **Execution stopped by user.**",
                             ))
                             .await;
@@ -899,10 +1192,10 @@ async fn run_interactive_loop(
                             .send(RoomMessageEventContent::text_markdown(final_msg))
                             .await;
 
-                        // Clear active task to be clean
+                        // Mark task as completed but keep the description
                         let mut bot_state = state.lock().await;
                         let room_state = bot_state.get_room_state(room.room_id().as_str());
-                        room_state.active_task = None;
+                        room_state.is_task_completed = true;
                         room_state.execution_history = None;
                         bot_state.save();
                         break;
@@ -1131,20 +1424,28 @@ pub async fn handle_ask(
 
     // Drop lock before spawn
     bot_state.save();
+    drop(bot_state);
 
     tokio::spawn(async move {
         let _ = room_clone.typing_notice(true).await;
 
         let agent_name = resolve_agent_name(active_agent.as_ref(), &config_clone);
 
-        let agent = get_agent(&agent_name, &config_clone);
         let context = AgentContext {
             prompt,
             working_dir: working_dir.clone(),
             model: active_model,
         };
 
-        let response = match agent.execute(&context).await {
+        let response = match execute_with_fallback(
+            &config_clone,
+            state.clone(),
+            &room_clone,
+            context,
+            &agent_name,
+        )
+        .await
+        {
             Ok(out) => out,
             Err(e) => format!("⚠️ **Error**: {}", e),
         };
@@ -1224,15 +1525,10 @@ pub async fn handle_discard(state: Arc<Mutex<BotState>>, room: &Room) {
 }
 
 /// Triggers a build of the project.
-pub async fn handle_build(config: &AppConfig, state: Arc<Mutex<BotState>>, room: &Room) {
+pub async fn handle_build(_config: &AppConfig, state: Arc<Mutex<BotState>>, room: &Room) {
     let mut bot_state = state.lock().await;
     let room_state = bot_state.get_room_state(room.room_id().as_str());
-    let cmd = config
-        .commands
-        .get("allowed")
-        .and_then(|m| m.get("build").or_else(|| m.get("rebuild")))
-        .map(|s| s.as_str())
-        .unwrap_or("cargo build"); // Default to cargo build if not set
+    let cmd = "cargo build";
 
     let _ = room
         .send(RoomMessageEventContent::text_markdown("🔨 **Building**..."))
@@ -1250,15 +1546,11 @@ pub async fn handle_build(config: &AppConfig, state: Arc<Mutex<BotState>>, room:
 }
 
 /// Triggers a deployment of the project.
-pub async fn handle_deploy(config: &AppConfig, state: Arc<Mutex<BotState>>, room: &Room) {
+pub async fn handle_deploy(_config: &AppConfig, state: Arc<Mutex<BotState>>, room: &Room) {
     let mut bot_state = state.lock().await;
     let room_state = bot_state.get_room_state(room.room_id().as_str());
-    let cmd = config
-        .commands
-        .get("allowed")
-        .and_then(|m| m.get("deploy"))
-        .map(|s| s.as_str())
-        .unwrap_or("docker compose up -d --build");
+    // Use standard docker deploy if allowed, or hardcoded default
+    let cmd = "docker compose up -d --build";
 
     let _ = room
         .send(RoomMessageEventContent::text_markdown(
@@ -1281,53 +1573,27 @@ pub async fn handle_deploy(config: &AppConfig, state: Arc<Mutex<BotState>>, room
 pub async fn handle_status(state: Arc<Mutex<BotState>>, room: &Room) {
     let mut bot_state = state.lock().await;
     let room_state = bot_state.get_room_state(room.room_id().as_str());
-    let mut status = String::from("**Status**\n");
+    let mut status = String::new();
 
     let current_path = room_state.current_project_path.as_deref().unwrap_or("None");
     let project_name = crate::util::get_project_name(current_path);
 
+    status.push_str("Use `.help` to list commands.\n");
     status.push_str(&format!("**Project**: `{}`\n", project_name));
     status.push_str(&format!(
         "**Agent**: `{}` | `{}`\n",
         room_state.active_agent.as_deref().unwrap_or("None"),
         room_state.active_model.as_deref().unwrap_or("None")
     ));
-    status.push_str(&format!(
-        "**Task**: `{}`\n",
+    let task_display = if room_state.is_task_completed {
+        "None"
+    } else {
         room_state.active_task.as_deref().unwrap_or("None")
-    ));
+    };
+
+    status.push_str(&format!("**Task**: `{}`\n\n", task_display));
 
     let _ = room
         .send(RoomMessageEventContent::text_markdown(status))
         .await;
-}
-
-/// Handles any command defined in the allowed section of the config.
-pub async fn handle_custom_command(
-    config: &AppConfig,
-    state: Arc<Mutex<BotState>>,
-    trigger: &str,
-    argument: &str,
-    room: &Room,
-) {
-    if let Some(command_binary) = config.commands.get("allowed").and_then(|m| m.get(trigger)) {
-        let _ = room.typing_notice(true).await;
-
-        let mut bot_state = state.lock().await;
-        let room_state = bot_state.get_room_state(room.room_id().as_str());
-        let cmd = if argument.is_empty() {
-            command_binary.to_string()
-        } else {
-            format!("{} {}", command_binary, argument)
-        };
-
-        let response = match run_command(&cmd, room_state.current_project_path.as_deref()).await {
-            Ok(o) => o,
-            Err(e) => e,
-        };
-
-        let content = RoomMessageEventContent::text_markdown(response);
-        let _ = room.send(content).await;
-        let _ = room.typing_notice(false).await;
-    }
 }

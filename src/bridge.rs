@@ -35,6 +35,11 @@ impl BridgeManager {
             return;
         };
 
+        // Ignore messages from self
+        if event.sender == room.own_user_id() {
+            return;
+        }
+
         // Ignore messages sent before the bot started
         let ts = SystemTime::UNIX_EPOCH
             + std::time::Duration::from_millis(event.origin_server_ts.0.into());
@@ -44,7 +49,27 @@ impl BridgeManager {
 
         let msg_body = event.content.body();
 
-        // Support only . as command prefix
+        // Handle admin shell commands
+        if msg_body.starts_with(',') {
+            crate::admin::handle_command(&self.config, self.state.clone(), &room, event.sender.as_str(), msg_body[1..].trim()).await;
+            return;
+        }
+
+        // Handle active wizard session
+        {
+            let wizard_active = {
+                let mut bot_state = self.state.lock().await;
+                let room_state = bot_state.get_room_state(room.room_id().as_str());
+                room_state.wizard.active
+            };
+
+            if wizard_active {
+                crate::wizard::handle_input(&self.config, self.state.clone(), &room, msg_body).await;
+                return;
+            }
+        }
+
+        // Support only . as command prefix for other commands
         if !msg_body.starts_with('.') {
             return;
         }
@@ -53,8 +78,13 @@ impl BridgeManager {
         let trigger = parts.next().unwrap_or("");
         let argument = parts.next().unwrap_or("").trim();
 
+        // Check permissions for help context
+        // Check permissions for help context
+        let sender_lower = event.sender.as_str().to_lowercase();
+        let is_admin = self.config.system.admin.iter().any(|u| u.to_lowercase() == sender_lower);
+
         match trigger {
-            "help" => commands::handle_help(&self.config, self.state.clone(), &room).await,
+            "help" => commands::handle_help(&self.config, self.state.clone(), &room, is_admin).await,
             "project" | "workdir" => {
                 commands::handle_project(&self.config, self.state.clone(), argument, &room).await
             }
@@ -83,14 +113,7 @@ impl BridgeManager {
             "deploy" => commands::handle_deploy(&self.config, self.state.clone(), &room).await,
             "status" => commands::handle_status(self.state.clone(), &room).await,
             _ => {
-                commands::handle_custom_command(
-                    &self.config,
-                    self.state.clone(),
-                    trigger,
-                    argument,
-                    &room,
-                )
-                .await
+                // Ignore unknown dot commands
             }
         }
     }
