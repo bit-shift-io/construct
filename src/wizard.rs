@@ -1,18 +1,16 @@
 use crate::config::AppConfig;
 use crate::state::{BotState, WizardMode, WizardState, WizardStep};
-use matrix_sdk::room::Room;
-use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
+use crate::services::ChatService;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-pub async fn start_wizard(
+pub async fn start_new_project_wizard<S: ChatService + Clone + Send + 'static>(
     state: Arc<Mutex<BotState>>,
-    room: &Room,
-    arg_project_name: Option<String>,
+    room: &S,
 ) {
     {
         let mut bot_state = state.lock().await;
-        let room_state = bot_state.get_room_state(room.room_id().as_str());
+        let room_state = bot_state.get_room_state(&room.room_id());
 
         room_state.wizard = WizardState {
             active: true,
@@ -22,13 +20,6 @@ pub async fn start_wizard(
             buffer: String::new(),
         };
 
-        if let Some(name) = arg_project_name {
-            if !name.is_empty() {
-                room_state.wizard.data.insert("name".to_string(), name);
-                room_state.wizard.step = Some(WizardStep::ProjectType);
-            }
-        }
-        
         bot_state.save();
     }
     
@@ -36,13 +27,13 @@ pub async fn start_wizard(
     render_step(state.clone(), room).await;
 }
 
-pub async fn start_task_wizard(
+pub async fn start_task_wizard<S: ChatService + Clone + Send + 'static>(
     state: Arc<Mutex<BotState>>,
-    room: &Room,
+    room: &S,
 ) {
     {
         let mut bot_state = state.lock().await;
-        let room_state = bot_state.get_room_state(room.room_id().as_str());
+        let room_state = bot_state.get_room_state(&room.room_id());
 
         room_state.wizard = WizardState {
             active: true,
@@ -58,21 +49,19 @@ pub async fn start_task_wizard(
     render_step(state.clone(), room).await;
 }
 
-pub async fn handle_input(
+pub async fn handle_input<S: ChatService + Clone + Send + 'static>(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
-    room: &Room,
+    room: &S,
     input: &str,
 ) {
     // 1. Check control commands
     if input == ".cancel" {
         let mut bot_state = state.lock().await;
-        let room_state = bot_state.get_room_state(room.room_id().as_str());
+        let room_state = bot_state.get_room_state(&room.room_id());
         room_state.wizard = WizardState::default(); // Reset
         bot_state.save();
-        let _ = room
-            .send(RoomMessageEventContent::text_plain("❌ Wizard cancelled."))
-            .await;
+        let _ = room.send_markdown(&crate::prompts::STRINGS.wizard.cancelled).await;
         return;
     }
 
@@ -80,7 +69,7 @@ pub async fn handle_input(
     if input == ".new" {
          {
             let mut bot_state = state.lock().await;
-            let room_state = bot_state.get_room_state(room.room_id().as_str());
+            let room_state = bot_state.get_room_state(&room.room_id());
             room_state.wizard = WizardState {
                 active: true,
                 mode: WizardMode::Project,
@@ -98,7 +87,7 @@ pub async fn handle_input(
     if input == ".task" {
          {
             let mut bot_state = state.lock().await;
-            let room_state = bot_state.get_room_state(room.room_id().as_str());
+            let room_state = bot_state.get_room_state(&room.room_id());
             room_state.wizard = WizardState {
                 active: true,
                 mode: WizardMode::Task,
@@ -114,7 +103,7 @@ pub async fn handle_input(
 
     let (step, _mode) = {
         let mut bot_state = state.lock().await;
-        let room_state = bot_state.get_room_state(room.room_id().as_str());
+        let room_state = bot_state.get_room_state(&room.room_id());
         (room_state.wizard.step.clone(), room_state.wizard.mode.clone())
     };
 
@@ -122,7 +111,7 @@ pub async fn handle_input(
         Some(WizardStep::ProjectName) => {
             let name = input.trim().to_string();
             if name.is_empty() {
-                 let _ = room.send(RoomMessageEventContent::text_plain("Please enter a valid project name or .cancel")).await;
+                 let _ = room.send_markdown("Please enter a valid project name or .cancel").await;
                  return;
             }
             update_data(state.clone(), room, "name", &name).await;
@@ -142,7 +131,7 @@ pub async fn handle_input(
                  update_data(state.clone(), room, "type", v).await;
                  advance_step(state.clone(), room, WizardStep::Stack).await;
              } else {
-                  let _ = room.send(RoomMessageEventContent::text_plain("❌ Invalid selection. Please select 1-4.")).await;
+                  let _ = room.send_markdown("❌ Invalid selection. Please select 1-4.").await;
                   render_step(state, room).await;
              }
         }
@@ -180,23 +169,23 @@ pub async fn handle_input(
                   // Trigger generation
                   finish_wizard(config, state.clone(), room).await;
              } else {
-                   let _ = room.send(RoomMessageEventContent::text_plain("Type .ok to generate or .cancel to abort.")).await;
+                   let _ = room.send_markdown("Type .ok to generate or .cancel to abort.").await;
              }
         }
         None => {}
     }
 }
 
-async fn update_data(state: Arc<Mutex<BotState>>, room: &Room, key: &str, val: &str) {
+async fn update_data<S: ChatService>(state: Arc<Mutex<BotState>>, room: &S, key: &str, val: &str) {
     let mut bot_state = state.lock().await;
-    let room_state = bot_state.get_room_state(room.room_id().as_str());
+    let room_state = bot_state.get_room_state(&room.room_id());
     room_state.wizard.data.insert(key.to_string(), val.to_string());
     bot_state.save();
 }
 
-async fn append_buffer(state: Arc<Mutex<BotState>>, room: &Room, input: &str) {
+async fn append_buffer<S: ChatService>(state: Arc<Mutex<BotState>>, room: &S, input: &str) {
     let mut bot_state = state.lock().await;
-    let room_state = bot_state.get_room_state(room.room_id().as_str());
+    let room_state = bot_state.get_room_state(&room.room_id());
     if !room_state.wizard.buffer.is_empty() {
         room_state.wizard.buffer.push('\n');
     }
@@ -204,36 +193,36 @@ async fn append_buffer(state: Arc<Mutex<BotState>>, room: &Room, input: &str) {
     bot_state.save();
 }
 
-async fn advance_step(state: Arc<Mutex<BotState>>, room: &Room, next_step: WizardStep) {
+async fn advance_step<S: ChatService + Clone + Send + 'static>(state: Arc<Mutex<BotState>>, room: &S, next_step: WizardStep) {
     {
         let mut bot_state = state.lock().await;
-        let room_state = bot_state.get_room_state(room.room_id().as_str());
+        let room_state = bot_state.get_room_state(&room.room_id());
         room_state.wizard.step = Some(next_step);
         bot_state.save();
     }
     render_step(state, room).await;
 }
 
-async fn render_step(state: Arc<Mutex<BotState>>, room: &Room) {
+async fn render_step<S: ChatService>(state: Arc<Mutex<BotState>>, room: &S) {
      let (step, buffer_len, mode) = {
         let mut bot_state = state.lock().await;
-        let room_state = bot_state.get_room_state(room.room_id().as_str());
+        let room_state = bot_state.get_room_state(&room.room_id());
         (room_state.wizard.step.clone(), room_state.wizard.buffer.len(), room_state.wizard.mode.clone())
     };
 
     let msg = match step {
         Some(WizardStep::ProjectName) => {
-            "**🚀 New Project Wizard**\n\nPlease enter a **Project Name** (no spaces, e.g., `my-cool-app`):".to_string()
+            crate::prompts::STRINGS.wizard.project_name.clone()
         }
         Some(WizardStep::ProjectType) => {
-            "**📂 Project Type**\n\n1. Application\n2. Library\n3. CLI Tool\n4. Web Site/App\n\nReply with number or name.".to_string()
+            crate::prompts::STRINGS.wizard.project_type.clone()
         }
         Some(WizardStep::Stack) => {
-             "**🛠️ Tech Stack**\n\n1. Rust\n2. Python\n3. TypeScript\n4. Go\n\nReply with number or type custom.".to_string()
+             crate::prompts::STRINGS.wizard.stack.clone()
         }
         Some(WizardStep::Description) => {
             if buffer_len == 0 {
-                "**📝 Description**\n\nDescribe your project features and requirements. You can send multiple messages.\n\nType `.ok` when finished.".to_string()
+                crate::prompts::STRINGS.wizard.description.clone()
             } else {
                 // Continuation prompt, maybe minimal
                 // Actually we don't spam on every message in description phase. 
@@ -245,14 +234,14 @@ async fn render_step(state: Arc<Mutex<BotState>>, room: &Room) {
         }
         Some(WizardStep::TaskDescription) => {
             if buffer_len == 0 {
-                 "**📋 New Task Wizard**\n\nEnter requirements as separate messages (each will be a bullet point).\n\nType `.ok` when finished.".to_string()
+                 crate::prompts::STRINGS.wizard.task_description.clone()
             } else {
                  return;
             }
         }
         Some(WizardStep::Confirmation) => {
              let mut bot_state = state.lock().await;
-             let room_state = bot_state.get_room_state(room.room_id().as_str());
+             let room_state = bot_state.get_room_state(&room.room_id());
              let d = &room_state.wizard.data;
              let desc = &room_state.wizard.buffer;
              
@@ -270,34 +259,34 @@ async fn render_step(state: Arc<Mutex<BotState>>, room: &Room) {
         None => return,
     };
 
-    let _ = room.send(RoomMessageEventContent::text_markdown(msg)).await;
+    let _ = room.send_markdown(&msg).await;
 }
 
-async fn finish_wizard(config: &AppConfig, state: Arc<Mutex<BotState>>, room: &Room) {
+async fn finish_wizard<S: ChatService + Clone + Send + 'static>(config: &AppConfig, state: Arc<Mutex<BotState>>, room: &S) {
     let mode = {
         let mut bot_state = state.lock().await;
-        let room_state = bot_state.get_room_state(room.room_id().as_str());
+        let room_state = bot_state.get_room_state(&room.room_id());
         room_state.wizard.mode.clone()
     };
     
     if mode == WizardMode::Task {
         let desc = {
             let mut bot_state = state.lock().await;
-            let room_state = bot_state.get_room_state(room.room_id().as_str());
+            let room_state = bot_state.get_room_state(&room.room_id());
             let desc = room_state.wizard.buffer.clone();
             room_state.wizard = WizardState::default();
             bot_state.save();
             desc
         };
         
-        let prompt = format!("Task Requirements:\n\n{}", desc);
+        let prompt = crate::prompts::STRINGS.prompts.task_requirements_prompt.replace("{}", &desc);
         crate::commands::handle_task(config, state.clone(), &prompt, room).await;
         return;
     }
 
     let (name, ptype, stack, desc) = {
         let mut bot_state = state.lock().await;
-        let room_state = bot_state.get_room_state(room.room_id().as_str());
+        let room_state = bot_state.get_room_state(&room.room_id());
         let d = &room_state.wizard.data;
         let desc = room_state.wizard.buffer.clone();
         
@@ -313,14 +302,19 @@ async fn finish_wizard(config: &AppConfig, state: Arc<Mutex<BotState>>, room: &R
     };
     
     // Construct the task arguments for the agent
-    let prompt = format!("Create a new {} project named '{}' using {}.\n\nRequirements:\n{}", ptype, name, stack, desc);
+    let prompt = crate::prompts::STRINGS.prompts.new_project_prompt
+        .replace("{}", &ptype)
+        .replace("{}", &name)
+        .replace("{}", &stack)
+        .replace("{}", &desc);
     
     // Trigger .new / .task logic
     // We reuse commands::handle_new (which creates dir) AND commands::handle_task (which generates plan).
     // Or we just call handle_new then handle_task.
     
     // 1. Create Project Dir
-    crate::commands::create_new_project(config, state.clone(), &name, room).await;
+    // Replaced create_new_project with handle_new
+    crate::commands::handle_new(config, state.clone(), &name, room).await;
     
     // 2. Start Task
     crate::commands::handle_task(config, state.clone(), &prompt, room).await;

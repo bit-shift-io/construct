@@ -20,5 +20,6 @@ pub trait Agent: Send + Sync {
     async fn execute(&self, context: &AgentContext) -> Result<String, String>;
 
     /// Returns the name of the agent (e.g., "gemini", "claude").
+    #[allow(dead_code)]
     fn name(&self) -> &str;
 }

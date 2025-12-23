@@ -6,6 +6,7 @@ use std::time::Duration;
 struct GeminiModel {
     name: String,
     #[serde(rename = "displayName")]
+    #[allow(dead_code)]
     display_name: Option<String>,
 }
 
@@ -34,7 +35,7 @@ pub async fn list_gemini_models(config: &AppConfig) -> Result<Vec<String>, Strin
     let api_key = if let Some(k) = &agent_config.api_key {
         k.clone()
     } else if let Some(env_var) = &agent_config.api_key_env {
-        std::env::var(env_var).map_err(|_| format!("Missing env var {}", env_var))?
+        std::env::var(env_var).map_err(|_| crate::prompts::STRINGS.messages.missing_env_var.replace("{}", env_var))?
     } else {
         std::env::var("GEMINI_API_KEY").map_err(|_| "Missing GEMINI_API_KEY")?
     };
@@ -53,13 +54,13 @@ pub async fn list_gemini_models_web(api_key: &str) -> Result<Vec<String>, String
     let resp = client.get(&url)
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch Gemini models: {}", e))?;
+        .map_err(|e| crate::prompts::STRINGS.messages.gemini_fetch_failed.replace("{}", &e.to_string()))?;
 
     if !resp.status().is_success() {
-        return Err(format!("Gemini API Error: {}", resp.status()));
+        return Err(crate::prompts::STRINGS.messages.gemini_api_error.replace("{}", &resp.status().to_string()));
     }
 
-    let body: GeminiListResponse = resp.json().await.map_err(|e| format!("Failed to parse Gemini response: {}", e))?;
+    let body: GeminiListResponse = resp.json().await.map_err(|e| crate::prompts::STRINGS.messages.gemini_parse_error.replace("{}", &e.to_string()))?;
     
     // Filter for generateContent supported models usually, but for now just list all "models/"
     // The API returns names like "models/gemini-1.5-flash"
@@ -80,7 +81,7 @@ pub async fn list_anthropic_models(config: &AppConfig) -> Result<Vec<String>, St
     let api_key = if let Some(k) = &agent_config.api_key {
         k.clone()
     } else if let Some(env_var) = &agent_config.api_key_env {
-        std::env::var(env_var).map_err(|_| format!("Missing env var {}", env_var))?
+        std::env::var(env_var).map_err(|_| crate::prompts::STRINGS.messages.missing_env_var.replace("{}", env_var))?
     } else {
         std::env::var("ANTHROPIC_API_KEY").map_err(|_| "Missing ANTHROPIC_API_KEY")?
     };
@@ -95,13 +96,13 @@ pub async fn list_anthropic_models(config: &AppConfig) -> Result<Vec<String>, St
         .header("anthropic-version", "2023-06-01")
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch Anthropic models: {}", e))?;
+        .map_err(|e| crate::prompts::STRINGS.messages.anthropic_fetch_failed.replace("{}", &e.to_string()))?;
         
     if !resp.status().is_success() {
-        return Err(format!("Anthropic API Error: {}", resp.status()));
+        return Err(crate::prompts::STRINGS.messages.anthropic_api_error.replace("{}", &resp.status().to_string()));
     }
     
-    let body: AnthropicListResponse = resp.json().await.map_err(|e| format!("Failed to parse Anthropic response: {}", e))?;
+    let body: AnthropicListResponse = resp.json().await.map_err(|e| crate::prompts::STRINGS.messages.anthropic_parse_error.replace("{}", &e.to_string()))?;
     
     Ok(body.data.into_iter().map(|m| m.id).collect())
 }

@@ -1,0 +1,256 @@
+help:
+  main: |
+    **🤖 Construct Help**
+    Usage: .command _args_
+
+    **📂 Project**
+    * new [name]: Reset/create project
+    * project [path]: Set project directory
+    * list: List projects
+    * task [desc]: Start a new task
+    * modify [desc]: Modify current task
+    * start: Start/resume tasks
+    * stop: Stop tasks
+
+    ** Git**
+    * changes
+    * commit [msg]
+    * discard
+
+    ** Build**
+    * check
+    * build
+    * deploy
+
+    **⚡ Misc**
+    * , [cmd]: Terminal command
+    * agents: list agents/models
+    * model [id]: set model
+    * ask [msg]: Chat with agent
+    * set [k] [v]
+    * read [files]
+    * status
+
+wizard:
+  project_name: "**🚀 New Project Wizard**\n\nPlease enter a **Project Folder Name** (no spaces, e.g., `my-cool-app`):"
+  project_type: "**📂 Project Type**\n\n1. Application\n2. Library\n3. CLI Tool\n4. Web Site/App\n\nReply with number or name."
+  stack: "**🛠️ Tech Stack**\n\n1. Rust\n2. Python\n3. TypeScript\n4. Go\n\nReply with number or type custom."
+  description: "**📝 Description**\n\nDescribe your project features and requirements. You can send multiple messages.\n\nType `.ok` when finished."
+  task_description: "**📋 New Task Wizard**\n\nEnter requirements as separate messages (each will be a bullet point).\n\nType `.ok` when finished."
+  confirmation_task: "**✅ Confirm Task**\n\n**Requirements**:\n{}\n\nType `.ok` to start task."
+  confirmation_project: "**✅ Review Project**\n\n**Name**: {}\n**Type**: {}\n**Stack**: {}\n**Description**: {} chars\n\nType `.ok` to generate plan."
+  cancelled: "❌ Wizard cancelled."
+  invalid_selection: "❌ Invalid selection. Please select 1-4."
+  type_ok_or_cancel: "Type .ok to generate or .cancel to abort."
+
+prompts:
+  system: |
+    # Agent Matrix System Prompt
+
+    You are an AI Coding Agent acting as a cooperative collaborator over Matrix. Your goal is to help users manage their projects, track tasks, and execute code changes.
+
+    ## Operation Mode
+    - You communicate primarily through a Matrix chat.
+    - You listen for commands starting with `.` or `!`.
+    - You manage project state (current working directory, active tasks).
+
+    ## Workflow
+    1. **Project Selection**: Use `.project <name>` to set the active project.
+    2. **Task Creation**: Use `.task <description>` to define a new objective.
+    3. **Planning**: When a task is set, generate a `plan.md` in the project directory and post it to the chat for approval.
+    4. **Execution**: Upon `.approve`, execute the changes described in the plan.
+    5. **Completion**: Once finished, generate a `walkthrough.md` summarizing the changes and post it.
+    6. **Review**: Listen for `.modify`, `.reject`, `.commit`, or `.discard`.
+
+    ## Rules
+    - Be concise and technical.
+    - Always verify your changes if possible (build/test).
+    - Do not make assumptions; ask for clarification if a task is ambiguous.
+    - Maintain a `tasks.md` file in the project root to track progress.
+
+    ## Command Reference
+    - `.help`: Show available commands.
+    - `.project <path>`: Set the current working directory.
+    - `.task <description>`: Start a new task.
+    - `.plan`: Show the current `plan.md`.
+    - `.approve`: Approve the current plan and start execution.
+    - `.reject`: Reject the current plan.
+    - `.modify <feedback>`: Refine the plan based on feedback.
+    - `.walkthrough`: Show the latest `walkthrough.md`.
+    - `.commit`: Commit the changes to git.
+    - `.discard`: Revert changes.
+
+  task_instructions: |
+    1. Use the 'Project Roadmap' and 'Architecture' above for understanding the big picture and constraints.
+    2. Your scope is STRICTLY limited to the 'Task' described above. Do NOT try to complete other roadmap items.
+    3. Generate two files:
+       - `plan.md`: A detailed technical plan for THIS specific task.
+       - `tasks.md`: A checklist of the subtasks for THIS specific task.
+
+  task_format: |
+    plan.md
+    ```markdown
+    ...content...
+    ```
+
+    tasks.md
+    ```markdown
+    ...content...
+    ```
+
+  new_project_instructions: |
+    4. **NEW PROJECT DETECTED**: You MUST also generate `roadmap.md` and `architecture.md` based on the task requirements to replace the default placeholders.
+
+  new_project_format: |
+
+    roadmap.md
+    ```markdown
+    ...content...
+    ```
+
+  modify_plan: |
+    {}
+
+    Original Task: {}
+
+    Current Plan:
+    {}
+
+    Feedback: {}
+
+    Please update the plan.md based on the feedback.
+
+    IMPORTANT: Return the content of plan.md in a code block.
+
+  task_requirements_prompt: "Task Requirements:\n\n{}"
+  new_project_prompt: "Create a new {} project named '{}' using {}.\n\nRequirements:\n{}"
+
+  initial_history_context: |
+    {}
+
+    Task: {}
+
+    Plan:
+    {}
+
+    Tasks Checklist:
+    {}
+
+    You are executing this plan. We will do this step-by-step.
+
+    You are currently in directory: `{}`
+
+  agent_history_entry: "\n\nAgent: {}\n\nSystem Command Output: {}"
+
+  # Templates
+  roadmap_template: "# Roadmap\n\n- [ ] Initial Setup"
+  architecture_template: "# Architecture\n\n- Overview: ..."
+  changelog_template: "# Changelog\n\n## 0.1.0\n- Initialized"
+  roadmap_context: "\n\n### Project Roadmap (Context Only)\n{}\n"
+  architecture_context: "\n\n### Architecture (Context Only)\n{}\n"
+
+messages:
+  status_header: "**📊 System Status**\n\n"
+  agent_list_header: "🕵️ Available Agents\n"
+  no_agents: "* (No specific agents configured)\n"
+  fallback_agent: "* deepai (universal fallback)\n"
+  active_room: "\nActive in this room: `{}`"
+  model_override: "\nModel Override: `{}`"
+  model_set: "✅ **Model set to**: `{}`"
+  model_reset: "✅ **Model reset to default**."
+  invalid_model: "⚠️ **Invalid model index or name**."
+  no_projects_found: "📂 **No projects found**."
+  available_projects_header: "**📂 Available Projects**\n"
+  invalid_project_name: "⚠️ **Invalid project name**."
+  admin_permission_denied: "{} you do not have permission to run terminal commands."
+  directory_changed: "📂 **Directory changed**: `{}`"
+  access_denied_sandbox: "❌ Access denied: Path outside the sandbox."
+  directory_not_found: "❌ Directory not found."
+  command_no_output: "✅ (Command executed successfully, no output)"
+  provider_error_model_switch: "⚠️ Provider Error: {err} \n🔄 Switching model: {from} -> {to}"
+  provider_error_agent_switch: "⚠️ Provider Error: {err} \n🔄 Switching Agent: {from} -> {to}"
+  write_plan_error: "⚠️ Failed to write plan.md: {}"
+  write_tasks_error: "⚠️ Failed to write tasks.md: {}"
+  feedback_modification: "🔄 Modifying plan with feedback: *{}*"
+  failed_modify: "⚠️ **Failed to modify plan**:\n{}"
+  plan_updated: "📜 **Plan Updated**:\n\n{}"
+  limit_reached: "⚠️ **Limit Reached**: Stopped to prevent infinite loop."
+  stop_requested: "🛑 **Execution stopped by user.**"
+  writing_file: "💾 **Writing File**: `{}`"
+  file_written: "✅ File written successfully."
+  write_failed: "❌ Failed to write file: {}"
+  execution_complete: "🏁 **Execution Complete**\n\n{}{}\n### 📋 Result\n{}"
+  agent_run_code: "🤖 **Agent wants to run**:\n```\n{}\n```"
+  agent_output: "✅ **Output**:\n```\n{}\n```"
+  agent_says: "🤔 **Agent says**:\n{}"
+  agent_error: "⚠️ Agent error: {}"
+  stop_request_wait: "🛑 **Stop requested**. Waiting for current step to finish..."
+  plan_approved: "✅ Plan approved for: **{}**\nStarting interactive execution..."
+  no_task_approve: "⚠️ **No task to approve**."
+  resuming_execution: "🔄 **Resuming execution**..."
+  no_history_continue: "⚠️ **No execution history found to continue**. Start a new task."
+  plan_rejected: "❌ **Plan rejected**. Task cleared."
+  please_commit_msg: "⚠️ **Please provide a commit message**: `.commit _message_`"
+  committed_msg: "🚀 **Committed**:\n{}"
+  changes_discarded: "🧹 **Changes discarded**."
+  building_msg: "🔨 **Building**..."
+  build_result: "🔨 **Build Result**:\n{}"
+  deploying_msg: "🚀 **Deploying**..."
+  deploy_result: "🚀 **Deploy Result**:\n{}"
+  code_block_output: "```\n{}\n```"
+
+  # Sandbox / Util
+  command_blocked: "Command '{}' is explicitly blocked."
+  command_ask: "Command '{}' requires confirmation."
+  command_not_allowed: "Command '{}' is not in allowlist."
+  command_unknown: "Unknown command '{}' (default policy is ask)."
+  command_run_failed: "Failed to run command: {}"
+  shell_command_failed: "Failed to run shell command: {}"
+  command_approval_request: "⚠️ **Command requires confirmation**:\n`{}`\n\nType `.ok` to allow or `.no` to deny/skip."
+  command_denied_user: "🚫 **Command denied by user**."
+  no_pending_command: "⚠️ **No pending command to approve/deny**."
+
+  # Agent Errors
+  missing_env_var: "Missing env var {}"
+  gemini_fetch_failed: "Failed to fetch Gemini models: {}"
+  gemini_api_error: "Gemini API Error: {}"
+  gemini_parse_error: "Failed to parse Gemini response: {}"
+  anthropic_fetch_failed: "Failed to fetch Anthropic models: {}"
+  anthropic_api_error: "Anthropic API Error: {}"
+  anthropic_parse_error: "Failed to parse Anthropic response: {}"
+  deepai_request_failed: "DeepAI Request Failed: {}"
+  deepai_api_error: "DeepAI API Error: {}"
+  deepai_parse_error: "DeepAI Parse Error: {}"
+  unsupported_provider: "Unsupported Unified provider: {}"
+  gemini_quota_exceeded: "Out of usage for this model: {} (Rate limit exceeded. Resets in approx. {}h {}m at midnight PT)"
+  gemini_api_hint: "{} (Hint: Check if 'Generative Language API' is enabled in Google Cloud Console, and ensure you are using an AI Studio key, not Vertex AI. Model: {})"
+
+  # Deep Scan - Commands.rs
+  no_projects_configured: "⚠️ No `projects_dir` configured."
+  provide_project_name: "⚠️ **Please provide a project name**: `.new _name_`"
+  project_exists: "📂 **Project already exists**. Switched to: `{}`\nSpecs detected."
+  create_dir_failed: "\n❌ **Failed to create directory** `{}`: {}"
+  project_created: "\n📂 **Created and set project directory to**: `{}`\n📄 **Initialized specs**: `roadmap.md`, `architecture.md`, `changelog.md`"
+  use_task_to_start: "\n\nUse `.task` to start a new workflow."
+  task_started: "📝 Task started: **{}**\nGenerating plan..."
+  plan_generated: "### Plan\n\n{}\n\n### Tasks generated.{}\n"
+  plan_generation_failed: "⚠️ **Failed to generate plan**:\n{}"
+  no_active_task_modify: "⚠️ No active task to modify. Use `.task` first."
+  current_changes_header: "🔍 **Current Changes**:\n```diff\n{}\n```"
+  output_truncated: "{}... (truncated)"
+
+logs:
+  config_loaded: "Loaded configuration for user: {}"
+  login_success: "Logged in successfully!"
+  setting_display_name: "Setting display name to: {}"
+  set_display_name_fail: "Failed to set display name: {}"
+  sync_loop_start: "Starting sync loop..."
+  sync_loop_fail: "Sync loop failed: {}"
+  shutdown: "Shutting down..."
+  shutdown_fail: "Unable to listen for shutdown signal: {}"
+  bridge_joining: "Bridge [{}]: Joining room {}..."
+  bridge_join_fail: "   Failed to join room {}: {}"
+  bridge_join_success: "   Successfully joined room {}."
+  invite_received: "💌 Received invite for room {:?}"
+  join_invite_fail: "Failed to join room after invite: {}"
+  join_invite_success: "✅ Successfully joined room!"

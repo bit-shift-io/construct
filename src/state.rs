@@ -46,6 +46,7 @@ pub struct RoomState {
     pub wizard: WizardState,
     #[serde(default)]
     pub model_cooldowns: HashMap<String, i64>, // "agent:model" -> timestamp
+    pub pending_command: Option<String>,
 }
 
 /// Persistent state of the bot, mapping Room IDs to their respective room states.

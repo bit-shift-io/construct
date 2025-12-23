@@ -1,22 +1,30 @@
 use crate::agent::{AgentContext, get_agent};
 use crate::config::AppConfig;
+use crate::services::ChatService;
 use crate::state::BotState;
 use crate::util::run_command;
-use matrix_sdk::{room::Room, ruma::events::room::message::RoomMessageEventContent};
 use std::fs;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use chrono; // Ensure chrono is available
 
+/// Pauses execution if `action_delay` is configured.
+async fn action_delay(config: &AppConfig) {
+    if let Some(ms) = config.system.action_delay {
+        tokio::time::sleep(tokio::time::Duration::from_millis(ms)).await;
+    }
+}
+
 /// Helper to execute an agent with fallback logic for "Out of usage" errors.
 async fn execute_with_fallback(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
-    room: &Room,
+    room: &impl ChatService,
     mut context: AgentContext,
     initial_agent_name: &str,
 ) -> Result<String, String> {
+    action_delay(config).await;
     let mut current_agent_name = initial_agent_name.to_string();
     let mut current_model = context.model.clone();
 
@@ -49,7 +57,7 @@ async fn execute_with_fallback(
                     || err_lower.contains("insufficient") {
                     
                     let mut bot_state = state.lock().await;
-                    let room_state = bot_state.get_room_state(room.room_id().as_str());
+                    let room_state = bot_state.get_room_state(&room.room_id());
 
                     // Get config for current agent to resolve default model if needed
                     let agent_conf = config.agents.get(&current_agent_name);
@@ -135,14 +143,12 @@ async fn execute_with_fallback(
                         };
 
                         if let Some(next) = next_model {
-                            let msg = format!(
-                                "⚠️ Provider Error: {} \n🔄 Switching model: {} -> {}",
-                                err,
-                                resolved_model_name,
-                                next
-                            );
+                            let msg = crate::prompts::STRINGS.messages.provider_error_model_switch
+                                .replace("{err}", &err)
+                                .replace("{from}", &resolved_model_name)
+                                .replace("{to}", &next);
                             // Notify
-                            let _ = room.send(RoomMessageEventContent::text_plain(&msg)).await;
+                            let _ = room.send_markdown(&msg).await;
 
                             // Update state
                             room_state.active_model = Some(next.clone());
@@ -154,11 +160,11 @@ async fn execute_with_fallback(
 
                         // 2. Fallback Agent
                         if let Some(fallback) = &agent_conf.fallback_agent {
-                            let msg = format!(
-                                "⚠️ Provider Error: {} \n🔄 Switching Agent: {} -> {}",
-                                err, current_agent_name, fallback
-                            );
-                            let _ = room.send(RoomMessageEventContent::text_plain(&msg)).await;
+                            let msg = crate::prompts::STRINGS.messages.provider_error_agent_switch
+                                .replace("{err}", &err)
+                                .replace("{from}", &current_agent_name)
+                                .replace("{to}", fallback);
+                            let _ = room.send_markdown(&msg).await;
 
                             // Update state
                             room_state.active_agent = Some(fallback.clone());
@@ -180,58 +186,17 @@ async fn execute_with_fallback(
 
 /// Displays help text with available commands.
 /// Displays help text with available commands.
-/// Displays help text with available commands.
-/// Displays help text with available commands.
 pub async fn handle_help(
     _config: &AppConfig,
     state: Arc<Mutex<BotState>>,
-    room: &Room,
-    is_admin: bool,
+    room: &impl ChatService,
+    _is_admin: bool,
 ) {
     let mut bot_state = state.lock().await;
-    let room_state = bot_state.get_room_state(room.room_id().as_str());
+    let room_state = bot_state.get_room_state(&room.room_id());
     let _current_project_full = room_state.current_project_path.as_deref().unwrap_or("None");
 
-    let mut response = String::from("**🤖 Construct Help**\n");
-    response.push_str("Usage: .command _args_\n\n");
-
-    response.push_str("**📂 Project**\n");
-    response.push_str("* project [path]: Set active project\n");
-    response.push_str("* new [name]: Reset/create project\n");
-    response.push_str("* set [k] [v]: Set config var\n");
-    response.push_str("* list: List projects\n");
-    response.push_str("* agents: List agents\n");
-    response.push_str("* model [name]: Set active model\n");
-    response.push_str("* read [files]: Read file contents\n");
-    response.push_str("* status: Show bot state\n\n");
-
-    response.push_str("**📝 Tasks**\n");
-    response.push_str("* task [desc]: Start new task\n");
-    response.push_str("* modify [text]: Refine current plan\n");
-    response.push_str("* start: Execute/resume plan\n");
-    response.push_str("* stop: Stop execution\n");
-    response.push_str("* ask [msg]: Chat with agent\n");
-    response.push_str("* reject: Clear current plan\n\n");
-
-    response.push_str("**🛠️ Dev**\n");
-    response.push_str("* changes: Show git diff\n");
-    response.push_str("* commit [msg]: Commit changes\n");
-    response.push_str("* discard: Revert changes\n");
-    response.push_str("* build: Run build\n");
-    response.push_str("* deploy: Run deploy\n\n");
-
-    if is_admin {
-        response.push_str("**⚡ Admin**\n");
-        response.push_str("* , [cmd]: Terminal command\n");
-    }
-
-    // Dont want to list allowed commands from new config
-    //for key in &config.commands.allowed {
-    //    response.push_str(&format!("* {}\n", key));
-    //}
-
-    let content = RoomMessageEventContent::text_markdown(response);
-    let _ = room.send(content).await;
+    let _ = room.send_markdown(&crate::prompts::STRINGS.help.main).await;
 }
 
 /// Handles project-related commands (setting or viewing the path).
@@ -239,52 +204,48 @@ pub async fn handle_project(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
     argument: &str,
-    room: &Room,
+    room: &impl ChatService,
 ) {
     let mut bot_state = state.lock().await;
-    let room_id = room.room_id().as_str();
+    let room_id = room.room_id();
 
     if argument.is_empty() {
-        let state = bot_state.get_room_state(room_id);
-        let resp = match &state.current_project_path {
+        let room_state = bot_state.get_room_state(&room_id);
+        let resp = match &room_state.current_project_path {
             Some(path) => {
                 let name = crate::util::get_project_name(path);
                 format!("📂 **Current project**: `{}`", name)
             }
             None => "📂 **No project set**. Use `.project _path_`".to_string(),
         };
-        let _ = room
-            .send(RoomMessageEventContent::text_markdown(resp))
-            .await;
-    } else {
-        let final_path = if !argument.starts_with('/') {
-            if let Some(base) = &config.system.projects_dir {
-                format!("{}/{}", base, argument)
-            } else {
-                argument.to_string()
-            }
+        let _ = room.send_markdown(&resp).await;
+        return;
+    }
+
+    let mut path = argument.to_string();
+    if !path.starts_with('/') {
+        if let Some(projects_dir) = &config.system.projects_dir {
+            path = format!("{}/{}", projects_dir, argument);
+        }
+    }
+
+    if let Ok(metadata) = fs::metadata(&path) {
+        if metadata.is_dir() {
+            let mut bot_state = state.lock().await;
+            let room_state = bot_state.get_room_state(&room.room_id());
+            room_state.current_project_path = Some(path.clone());
+            // Clear task context when switching projects
+            room_state.active_task = None;
+            room_state.execution_history = None; 
+            room_state.is_task_completed = false;
+            bot_state.save();
+
+            let _ = room.send_markdown(&format!("📂 **Project info set to**: `{}`", path)).await;
         } else {
-            argument.to_string()
-        };
-
-        let state = bot_state.get_room_state(room_id);
-        state.current_project_path = Some(final_path.clone());
-        bot_state.save();
-
-        let projects_root = config
-            .system
-            .projects_dir
-            .clone()
-            .unwrap_or_else(|| ".".to_string());
-        let sandbox = crate::sandbox::Sandbox::new(projects_root);
-        let display_path = sandbox.virtualize_output(&final_path);
-
-        let _ = room
-            .send(RoomMessageEventContent::text_markdown(format!(
-                "✅ **Project set to**: `{}`",
-                display_path
-            )))
-            .await;
+            let _ = room.send_markdown(&format!("⚠️ `{}` is not a directory.", path)).await;
+        }
+    } else {
+        let _ = room.send_markdown(&format!("⚠️ Path `{}` not found.", path)).await;
     }
 }
 
@@ -293,18 +254,14 @@ pub async fn handle_set(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
     argument: &str,
-    room: &Room,
+    room: &impl ChatService,
 ) {
     let mut parts = argument.splitn(2, ' ');
     let key = parts.next().unwrap_or("").trim();
     let value = parts.next().unwrap_or("").trim();
 
     if key.is_empty() || value.is_empty() {
-        let _ = room
-            .send(RoomMessageEventContent::text_markdown(
-                "⚠️ **Usage**: `.set _key_ _value_`",
-            ))
-            .await;
+        let _ = room.send_markdown("⚠️ **Usage**: `.set _key_ _value_`").await;
         return;
     }
 
@@ -312,40 +269,29 @@ pub async fn handle_set(
         "project" | "workdir" => handle_project(config, state, value, room).await,
         "agent" => {
             let mut bot_state = state.lock().await;
-            let room_state = bot_state.get_room_state(room.room_id().as_str());
+            let room_state = bot_state.get_room_state(&room.room_id());
             room_state.active_agent = Some(value.to_string());
             bot_state.save();
-            let _ = room
-                .send(RoomMessageEventContent::text_markdown(format!(
-                    "✅ **Agent set to**: `{}`",
-                    value
-                )))
-                .await;
+            let _ = room.send_markdown(&crate::prompts::STRINGS.messages.model_set.replace("{}", value)).await;
         }
         _ => {
-            let _ = room
-                .send(RoomMessageEventContent::text_markdown(format!(
-                    "⚠️ Unknown variable `{}`. Supported: `project`, `agent`",
-                    key
-                )))
-                .await;
+            let _ = room.send_markdown(&format!(
+                "⚠️ Unknown variable `{}`. Supported: `project`, `agent`",
+                key
+            )).await;
         }
     }
 }
 
 /// Reads one or more files and prints their contents.
-pub async fn handle_read(state: Arc<Mutex<BotState>>, argument: &str, room: &Room) {
+pub async fn handle_read(state: Arc<Mutex<BotState>>, argument: &str, room: &impl ChatService) {
     if argument.is_empty() {
-        let _ = room
-            .send(RoomMessageEventContent::text_markdown(
-                "⚠️ **Please specify files**: `.read _file1_ _file2_`",
-            ))
-            .await;
+        let _ = room.send_markdown("⚠️ **Please specify files**: `.read _file1_ _file2_`").await;
         return;
     }
 
     let mut bot_state = state.lock().await;
-    let room_state = bot_state.get_room_state(room.room_id().as_str());
+    let room_state = bot_state.get_room_state(&room.room_id());
     let mut response = String::new();
 
     for file in argument.split_whitespace() {
@@ -365,21 +311,15 @@ pub async fn handle_read(state: Arc<Mutex<BotState>>, argument: &str, room: &Roo
         }
     }
 
-    let _ = room
-        .send(RoomMessageEventContent::text_markdown(response))
-        .await;
+    let _ = room.send_markdown(&response).await;
 }
 
 /// Lists available projects in the configured projects directory.
-pub async fn handle_list(config: &AppConfig, room: &Room) {
+pub async fn handle_list(config: &AppConfig, room: &impl ChatService) {
     let projects_dir = match &config.system.projects_dir {
         Some(dir) => dir,
         None => {
-            let _ = room
-                .send(RoomMessageEventContent::text_markdown(
-                    "⚠️ No `projects_dir` configured.",
-                ))
-                .await;
+            let _ = room.send_markdown("⚠️ No `projects_dir` configured.").await;
             return;
         }
     };
@@ -402,27 +342,19 @@ pub async fn handle_list(config: &AppConfig, room: &Room) {
     projects.sort();
 
     if projects.is_empty() {
-        let _ = room
-            .send(RoomMessageEventContent::text_markdown(
-                "📂 **No projects found**.",
-            ))
-            .await;
+        let _ = room.send_markdown(&crate::prompts::STRINGS.messages.no_projects_found).await;
     } else {
-        let mut response = String::from("**📂 Available Projects**\n");
+        let mut response = crate::prompts::STRINGS.messages.available_projects_header.clone();
         for project in projects {
             response.push_str(&format!("* `{}`\n", project));
         }
-        let _ = room
-            .send(RoomMessageEventContent::text_markdown(response))
-            .await;
+        let _ = room.send_markdown(&response).await;
     }
 }
 
 /// Lists available agents configured in the bot.
-/// Lists available agents configured in the bot.
-/// Lists available agents configured in the bot.
-pub async fn handle_agents(config: &AppConfig, state: Arc<Mutex<BotState>>, room: &Room) {
-    let mut response = String::from("🕵️ Available Agents\n");
+pub async fn handle_agents(config: &AppConfig, state: Arc<Mutex<BotState>>, room: &impl ChatService) {
+    let mut response = crate::prompts::STRINGS.messages.agent_list_header.clone();
     let mut model_list = Vec::new();
 
     // Fetch models concurrently - using discovery logic
@@ -481,15 +413,15 @@ pub async fn handle_agents(config: &AppConfig, state: Arc<Mutex<BotState>>, room
 
     // Check if map is empty, showing fallback
     if config.agents.is_empty() {
-        response.push_str("* (No specific agents configured)\n");
+        response.push_str(&crate::prompts::STRINGS.messages.no_agents);
     }
 
-    response.push_str("* deepai (universal fallback)\n");
+    response.push_str(&crate::prompts::STRINGS.messages.fallback_agent);
 
     // Scope the borrow of room_state
     let (active, override_model) = {
         let mut bot_state = state.lock().await;
-        let room_state = bot_state.get_room_state(room.room_id().as_str());
+        let room_state = bot_state.get_room_state(&room.room_id());
 
         // Save the list for index selection
         room_state.last_model_list = model_list;
@@ -506,150 +438,149 @@ pub async fn handle_agents(config: &AppConfig, state: Arc<Mutex<BotState>>, room
         (active, override_model)
     };
 
-    response.push_str(&format!("\nActive in this room: `{}`", active));
+    response.push_str(&format!("{}", crate::prompts::STRINGS.messages.active_room.replace("{}", &active)));
 
     if let Some(model) = override_model {
-        response.push_str(&format!("\nModel Override: `{}`", model));
+        response.push_str(&format!("{}", crate::prompts::STRINGS.messages.model_override.replace("{}", &model)));
     }
 
-    let _ = room
-        .send(RoomMessageEventContent::text_markdown(response))
-        .await;
+    let _ = room.send_markdown(&response).await;
 }
 
 /// Sets the active model for the current room.
 /// Sets the active model for the current room.
-pub async fn handle_model(state: Arc<Mutex<BotState>>, argument: &str, room: &Room) {
+pub async fn handle_model(state: Arc<Mutex<BotState>>, argument: &str, room: &impl ChatService) {
     let mut bot_state = state.lock().await;
-    let room_state = bot_state.get_room_state(room.room_id().as_str());
-    let arg = argument.trim();
+    let room_state = bot_state.get_room_state(&room.room_id());
 
-    if arg.is_empty() {
-        room_state.active_model = None;
-        let _ = room
-            .send(RoomMessageEventContent::text_plain(
-                "🔄 Model override cleared. Using agent defaults.",
-            ))
-            .await;
-    } else {
-        // Try parsing as number
-        if let Ok(idx) = arg.parse::<usize>() {
-            if idx > 0 && idx <= room_state.last_model_list.len() {
-                let model_name = room_state.last_model_list[idx - 1].clone();
-                room_state.active_model = Some(model_name.clone());
-                let _ = room
-                    .send(RoomMessageEventContent::text_markdown(format!(
-                        "🎯 Active model set to `{}` (Index {})",
-                        model_name, idx
-                    )))
-                    .await;
-            } else {
-                let _ = room
-                    .send(RoomMessageEventContent::text_plain(format!(
-                        "⚠️ Invalid index {}. Use `.agents` to see list.",
-                        idx
-                    )))
-                    .await;
-            }
+    // Check if argument is an index for selection
+    let model_to_set = if let Ok(idx) = argument.parse::<usize>() {
+        // 1-based index expected from UI
+        if idx > 0 && idx <= room_state.last_model_list.len() {
+             Some(room_state.last_model_list[idx - 1].clone())
         } else {
-            room_state.active_model = Some(arg.to_string());
-            let _ = room
-                .send(RoomMessageEventContent::text_markdown(format!(
-                    "🎯 Active model set to `{}`",
-                    arg
-                )))
-                .await;
+            None
         }
+    } else if !argument.is_empty() {
+        Some(argument.to_string())
+    } else {
+        None
+    };
+
+    if let Some(model) = model_to_set {
+        room_state.active_model = Some(model.clone());
+        bot_state.save();
+        let _ = room.send_markdown(&crate::prompts::STRINGS.messages.model_set.replace("{}", &model)).await;
+    } else if argument.is_empty() {
+        room_state.active_model = None;
+        bot_state.save();
+        let _ = room.send_markdown(&crate::prompts::STRINGS.messages.model_reset).await;
+    } else {
+        let _ = room.send_markdown(&crate::prompts::STRINGS.messages.invalid_model).await;
     }
-    bot_state.save();
 }
 
 /// Entry point for .new command. STARTS the wizard if not internal.
-pub async fn handle_new(
+pub async fn handle_new<S: ChatService + Clone + Send + 'static>(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
     argument: &str,
-    room: &Room,
+    room: &S,
 ) {
-    let wizard_active = {
-        let mut bot_state = state.lock().await;
-        let room_state = bot_state.get_room_state(room.room_id().as_str());
-        room_state.wizard.active
-    };
-
-    if !wizard_active {
-        let name_arg = if argument.is_empty() {
-            None
-        } else {
-            Some(argument.to_string())
-        };
-        crate::wizard::start_wizard(state.clone(), room, name_arg).await;
-        return;
-    }
-
-    create_new_project(config, state, argument, room).await;
-}
-
-pub async fn create_new_project(
-    config: &AppConfig,
-    state: Arc<Mutex<BotState>>,
-    argument: &str,
-    room: &Room,
-) {
-    let mut bot_state = state.lock().await;
-    let mut response = String::from("🧹 **Active task cleared**.");
-
-    if !argument.is_empty() {
-        let final_path = if !argument.starts_with('/') {
-            if let Some(base) = &config.system.projects_dir {
-                format!("{}/{}", base, argument)
-            } else {
-                argument.to_string()
-            }
-        } else {
-            argument.to_string()
+    if argument.is_empty() {
+        let wizard_active = {
+            let mut bot_state = state.lock().await;
+            let room_state = bot_state.get_room_state(&room.room_id());
+            room_state.wizard.active
         };
 
-        // Attempt to create the directory
-        match fs::create_dir_all(&final_path) {
-            Ok(_) => {
-                // Initialize Project Documentation
-                let _ = fs::write(format!("{}/roadmap.md", final_path), "# Project Roadmap\n\n- [ ] Initial Setup");
-                let _ = fs::write(format!("{}/architecture.md", final_path), "# System Architecture\n\nTo be defined.");
-                let _ = fs::write(format!("{}/changelog.md", final_path), "# Changelog\n\n## Unreleased");
-
-                let room_state = bot_state.get_room_state(room.room_id().as_str());
-                room_state.current_project_path = Some(final_path.clone());
-                response.push_str(&format!(
-                    "\n📂 **Created and set project directory to**: `{}`\n📄 **Initialized specs**: `roadmap.md`, `architecture.md`, `changelog.md`",
-                    final_path
-                ));
-            }
-            Err(e) => {
-                response.push_str(&format!(
-                    "\n❌ **Failed to create directory** `{}`: {}",
-                    final_path, e
-                ));
-            }
+        if !wizard_active {
+            crate::wizard::start_new_project_wizard(state.clone(), room).await;
+            return;
         }
     }
 
-    let room_state = bot_state.get_room_state(room.room_id().as_str());
-    room_state.active_task = None;
-    room_state.is_task_completed = false;
-    room_state.execution_history = None;
-    bot_state.save();
+    let mut bot_state = state.lock().await;
+    
+    // We can't hold lock across await if we're not careful, but FS ops are blocking std fs here? 
+    // Wait, fs::create_dir_all is synchronous std::fs or tokio? 
+    // The import says 'use std::fs'.
+    
+    let projects_dir = match &config.system.projects_dir {
+        Some(dir) => dir,
+        None => {
+            let _ = room.send_markdown(&crate::prompts::STRINGS.messages.no_projects_configured).await;
+            return;
+        }
+    };
 
-    response.push_str("\n\nUse `.task` to start a new workflow.");
-    let _ = room
-        .send(RoomMessageEventContent::text_markdown(response))
-        .await;
+    let project_name = argument.trim();
+    if project_name.is_empty() {
+        let _ = room.send_markdown(&crate::prompts::STRINGS.messages.provide_project_name).await;
+        return;
+    }
+    
+    // Basic sanitization
+    if project_name.contains('/') || project_name.contains('\\') || project_name.starts_with('.') {
+        let _ = room.send_markdown(&crate::prompts::STRINGS.messages.invalid_project_name).await;
+        return;
+    }
+
+    let final_path = format!("{}/{}", projects_dir, project_name);
+
+    if let Ok(metadata) = fs::metadata(&final_path) {
+        if metadata.is_dir() {
+            let room_state = bot_state.get_room_state(&room.room_id());
+            room_state.current_project_path = Some(final_path.clone());
+            room_state.active_task = None;
+            room_state.is_task_completed = false;
+            room_state.execution_history = None;
+            bot_state.save();
+
+            let _ = room.send_markdown(&crate::prompts::STRINGS.messages.project_exists.replace("{}", &final_path)).await;
+            return;
+        }
+    }
+
+    // Create
+    let mut response = String::new();
+    if let Err(e) = fs::create_dir_all(&final_path) {
+        response.push_str(&crate::prompts::STRINGS.messages.create_dir_failed.replace("{}", &final_path).replace("{}", &e.to_string()));
+    } else {
+        // Init specs
+        let roadmap_path = format!("{}/roadmap.md", final_path);
+        let arch_path = format!("{}/architecture.md", final_path);
+        let changelog_path = format!("{}/changelog.md", final_path);
+
+        // Populate with defaults if missing
+        if !fs::metadata(&roadmap_path).is_ok() {
+            let _ = fs::write(&roadmap_path, &crate::prompts::STRINGS.prompts.roadmap_template);
+        }
+        if !fs::metadata(&arch_path).is_ok() {
+            let _ = fs::write(&arch_path, &crate::prompts::STRINGS.prompts.architecture_template);
+        }
+        if !fs::metadata(&changelog_path).is_ok() {
+            let _ = fs::write(&changelog_path, &crate::prompts::STRINGS.prompts.changelog_template);
+        }
+
+        let room_state = bot_state.get_room_state(&room.room_id());
+        room_state.current_project_path = Some(final_path.clone());
+        room_state.active_task = None;
+        room_state.is_task_completed = false;
+        room_state.execution_history = None;
+        bot_state.save();
+
+        response.push_str(&crate::prompts::STRINGS.messages.project_created.replace("{}", &final_path));
+    }
+    
+    response.push_str(&crate::prompts::STRINGS.messages.use_task_to_start);
+    let _ = room.send_markdown(&response).await;
 }
 
 // Helper to resolve the active agent name with smart fallback.
-pub fn resolve_agent_name(active_agent: Option<&String>, config: &AppConfig) -> String {
+pub fn resolve_agent_name(active_agent: Option<&str>, config: &AppConfig) -> String {
     if let Some(agent) = active_agent {
-        return agent.clone();
+        return agent.to_string();
     }
 
     // Defaulting to smart detection if no explicit agent is active
@@ -670,16 +601,16 @@ pub fn resolve_agent_name(active_agent: Option<&String>, config: &AppConfig) -> 
 }
 
 /// Starts a new task by generating a plan using an agent.
-pub async fn handle_task(
+pub async fn handle_task<S: ChatService + Clone + Send + 'static>(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
     argument: &str,
-    room: &Room,
+    room: &S,
 ) {
     if argument.is_empty() {
         let wizard_active = {
             let mut bot_state = state.lock().await;
-            let room_state = bot_state.get_room_state(room.room_id().as_str());
+            let room_state = bot_state.get_room_state(&room.room_id());
             room_state.wizard.active
         };
 
@@ -708,14 +639,9 @@ pub async fn handle_task(
     let config_clone = config.clone();
 
     tokio::spawn(async move {
-        let _ = room_clone
-            .send(RoomMessageEventContent::text_markdown(format!(
-                "📝 Task started: **{}**\nGenerating plan...",
-                task_desc
-            )))
-            .await;
+    let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.task_started.replace("{}", &task_desc)).await;
 
-        let system_prompt = fs::read_to_string("system_prompt.md").unwrap_or_default();
+        let system_prompt = crate::prompts::STRINGS.prompts.system.clone();
         
         // Read Project Context and Detect New Project
         let mut project_context = String::new();
@@ -726,20 +652,20 @@ pub async fn handle_task(
                 if roadmap.contains("- [ ] Initial Setup") {
                     is_new_project = true;
                 }
-                project_context.push_str(&format!("\n\n### Project Roadmap (Context Only)\n{}\n", roadmap));
+                project_context.push_str(&crate::prompts::STRINGS.prompts.roadmap_context.replace("{}", &roadmap));
             }
             if let Ok(arch) = fs::read_to_string(format!("{}/architecture.md", wd)) {
-                project_context.push_str(&format!("\n\n### Architecture (Context Only)\n{}\n", arch));
+                project_context.push_str(&crate::prompts::STRINGS.prompts.architecture_context.replace("{}", &arch));
             }
         }
 
-        let mut instructions = String::from("1. Use the 'Project Roadmap' and 'Architecture' above for understanding the big picture and constraints.\n2. Your scope is STRICTLY limited to the 'Task' described above. Do NOT try to complete other roadmap items.\n3. Generate two files:\n   - `plan.md`: A detailed technical plan for THIS specific task.\n   - `tasks.md`: A checklist of the subtasks for THIS specific task.");
+        let mut instructions = crate::prompts::STRINGS.prompts.task_instructions.clone();
 
-        let mut return_format = String::from("plan.md\n```markdown\n...content...\n```\n\ntasks.md\n```markdown\n...content...\n```");
+        let mut return_format = crate::prompts::STRINGS.prompts.task_format.clone();
 
         if is_new_project {
-             instructions.push_str("\n4. **NEW PROJECT DETECTED**: You MUST also generate `roadmap.md` and `architecture.md` based on the task requirements to replace the default placeholders.");
-             return_format.push_str("\n\nroadmap.md\n```markdown\n...content...\n```\n\narchitecture.md\n```markdown\n...content...\n```");
+             instructions.push_str(&format!("\n{}", crate::prompts::STRINGS.prompts.new_project_instructions));
+             return_format.push_str(&format!("\n{}", crate::prompts::STRINGS.prompts.new_project_format));
         }
 
         let prompt = format!(
@@ -747,32 +673,35 @@ pub async fn handle_task(
             system_prompt, project_context, task_desc, instructions, return_format
         );
 
-        let agent_name = resolve_agent_name(active_agent.as_ref(), &config_clone);
+    let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.task_started.replace("{}", &task_desc)).await;
 
-        let context = AgentContext {
-            prompt,
-            working_dir: working_dir.clone(),
-            model: active_model,
-        };
+    // Send Typing Indicator
+    let _ = room_clone.typing(true).await;
 
-        let result = execute_with_fallback(
-            &config_clone,
-            state.clone(),
-            &room_clone,
-            context,
-            &agent_name,
-        )
-        .await;
+    // Resolve agent name
+    let agent_name = resolve_agent_name(active_agent.as_deref(), &config_clone);
 
-        match result {
-            Ok(output) => {
-                let _ = room_clone
-                    .send(RoomMessageEventContent::text_markdown(
-                        "📜 **Plan Phase Complete**.",
-                    ))
-                    .await;
+    let context = AgentContext {
+        prompt,
+        working_dir: working_dir.clone(),
+        model: active_model,
+    };
+    
+    // We need to clone the room wrapper? No, room in signature is reference.
+    // execute_with_fallback usually needs ref.
+    // However, if we need to pass it to async block, we might need shared ownership or something.
+    // Ah, execute_with_fallback takes `&impl ChatService`.
+    // But earlier I just passed `&room`.
+    
+    let result = execute_with_fallback(&config_clone, state.clone(), &room_clone, context, &agent_name).await;
 
-                // Simple parsing helper
+    let _ = room_clone.typing(false).await;
+
+    match result {
+        Ok(output) => {
+            let _ = room_clone.send_markdown(&output).await;
+
+        // Simple parsing helper
                 let parse_file = |name: &str, text: &str| -> Option<String> {
                     let start_marker = format!("{}\n```", name);
                     let alt_marker = format!("{}\n```markdown", name);
@@ -806,12 +735,7 @@ pub async fn handle_task(
                     .map(|p| format!("{}/plan.md", p))
                     .unwrap_or_else(|| "plan.md".to_string());
                 if let Err(e) = fs::write(&plan_path, &plan_content) {
-                    let _ = room_clone
-                        .send(RoomMessageEventContent::text_plain(format!(
-                            "⚠️ Failed to write plan.md: {}",
-                            e
-                        )))
-                        .await;
+                    let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.write_plan_error.replace("{}", &e.to_string())).await;
                 }
 
                 if let Some(tasks) = tasks_content {
@@ -820,12 +744,7 @@ pub async fn handle_task(
                         .map(|p| format!("{}/tasks.md", p))
                         .unwrap_or_else(|| "tasks.md".to_string());
                     if let Err(e) = fs::write(&tasks_path, &tasks) {
-                        let _ = room_clone
-                            .send(RoomMessageEventContent::text_plain(format!(
-                                "⚠️ Failed to write tasks.md: {}",
-                                e
-                            )))
-                            .await;
+                        let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.write_tasks_error.replace("{}", &e.to_string())).await;
                     }
                 }
 
@@ -846,42 +765,28 @@ pub async fn handle_task(
                      }
                 }
 
-                let _ = room_clone
-                    .send(RoomMessageEventContent::text_markdown(format!(
-                        "### Plan\n\n{}\n\n### Tasks generated.{}\n",
-                        plan_content, extra_msg
-                    )))
-                    .await;
+                let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.plan_generated.replace("{}", &plan_content).replace("{}", &extra_msg)).await;
             }
             Err(e) => {
-                let _ = room_clone
-                    .send(RoomMessageEventContent::text_markdown(format!(
-                        "⚠️ **Failed to generate plan**:\n{}",
-                        e
-                    )))
-                    .await;
+                let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.plan_generation_failed.replace("{}", &e.to_string())).await;
             }
         }
     });
 }
 
 /// Refines the current plan based on user feedback.
-pub async fn handle_modify(
+pub async fn handle_modify<S: ChatService + Clone + Send + 'static>(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
     argument: &str,
-    room: &Room,
+    room: &S,
 ) {
     let mut bot_state = state.lock().await;
-    let room_state = bot_state.get_room_state(room.room_id().as_str());
+    let room_state = bot_state.get_room_state(&room.room_id());
     let task_desc = match &room_state.active_task {
         Some(t) => t.clone(),
         None => {
-            let _ = room
-                .send(RoomMessageEventContent::text_markdown(
-                    "⚠️ No active task to modify. Use `.task` first.",
-                ))
-                .await;
+            let _ = room.send_markdown(&crate::prompts::STRINGS.messages.no_active_task_modify).await;
             return;
         }
     };
@@ -896,14 +801,9 @@ pub async fn handle_modify(
     drop(bot_state);
 
     tokio::spawn(async move {
-        let _ = room_clone
-            .send(RoomMessageEventContent::text_markdown(format!(
-                "🔄 Modifying plan with feedback: *{}*",
-                feedback
-            )))
-            .await;
+        let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.feedback_modification.replace("{}", &feedback)).await;
 
-        let system_prompt = fs::read_to_string("system_prompt.md").unwrap_or_default();
+        let system_prompt = crate::prompts::STRINGS.prompts.system.clone();
         let plan_path = working_dir
             .as_ref()
             .map(|p| format!("{}/plan.md", p))
@@ -911,12 +811,13 @@ pub async fn handle_modify(
         let current_plan =
             fs::read_to_string(&plan_path).unwrap_or_else(|_| "No plan found.".to_string());
 
-        let prompt = format!(
-            "{}\n\nOriginal Task: {}\n\nCurrent Plan:\n{}\n\nFeedback: {}\n\nPlease update the plan.md based on the feedback.\n\nIMPORTANT: Return the content of plan.md in a code block.",
-            system_prompt, task_desc, current_plan, feedback
-        );
+        let prompt = crate::prompts::STRINGS.prompts.modify_plan
+            .replace("{}", &system_prompt)
+            .replace("{}", &task_desc)
+            .replace("{}", &current_plan)
+            .replace("{}", &feedback);
 
-        let agent_name = resolve_agent_name(active_agent.as_ref(), &config_clone);
+        let agent_name = resolve_agent_name(active_agent.as_deref(), &config_clone);
 
         let context = AgentContext {
             prompt,
@@ -936,27 +837,12 @@ pub async fn handle_modify(
         match result {
             Ok(output) => {
                 if let Err(e) = fs::write(&plan_path, &output) {
-                    let _ = room_clone
-                        .send(RoomMessageEventContent::text_markdown(format!(
-                            "⚠️ Failed to write updated plan.md: {}",
-                            e
-                        )))
-                        .await;
+                    let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.write_plan_error.replace("{}", &e.to_string())).await;
                 }
-                let _ = room_clone
-                    .send(RoomMessageEventContent::text_markdown(format!(
-                        "📜 **Plan Updated**:\n\n{}",
-                        output
-                    )))
-                    .await;
+                let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.plan_updated.replace("{}", &output)).await;
             }
             Err(e) => {
-                let _ = room_clone
-                    .send(RoomMessageEventContent::text_markdown(format!(
-                        "⚠️ **Failed to modify plan**:\n{}",
-                        e
-                    )))
-                    .await;
+                let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.failed_modify.replace("{}", &e.to_string())).await;
             }
         }
     });
@@ -964,10 +850,10 @@ pub async fn handle_modify(
 
 /// Shared logic for the interactive execution loop.
 /// Can be called from `handle_approve` (start new) or `handle_continue` (resume old).
-async fn run_interactive_loop(
+async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
     config: AppConfig,
     state: Arc<Mutex<BotState>>,
-    room: Room,
+    room: S,
     mut conversation_history: String,
     working_dir: Option<String>,
     active_agent: Option<String>,
@@ -977,34 +863,26 @@ async fn run_interactive_loop(
     let max_steps = 20;
 
     // Resolve tools once
-    let agent_name = resolve_agent_name(active_agent.as_ref(), &config);
-    let system_prompt = fs::read_to_string("system_prompt.md").unwrap_or_default();
+    let agent_name = resolve_agent_name(active_agent.as_deref(), &config);
+    let system_prompt = crate::prompts::STRINGS.prompts.system.clone();
     let room_clone = room.clone();
 
     loop {
         // Check for stop request
         {
             let mut bot_state = state.lock().await;
-            let room_state = bot_state.get_room_state(room.room_id().as_str());
+            let room_state = bot_state.get_room_state(&room.room_id());
             if room_state.stop_requested {
                 room_state.stop_requested = false;
                 bot_state.save();
-                let _ = room_clone
-                    .send(RoomMessageEventContent::text_markdown(
-                        "🛑 **Execution stopped by user.**",
-                    ))
-                    .await;
+                let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.stop_requested).await;
                 break;
             }
         }
 
         step_count += 1;
         if step_count > max_steps {
-            let _ = room_clone
-                .send(RoomMessageEventContent::text_markdown(
-                    "⚠️ **Limit Reached**: Stopped to prevent infinite loop.",
-                ))
-                .await;
+            let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.limit_reached).await;
             break;
         }
 
@@ -1026,14 +904,14 @@ async fn run_interactive_loop(
             model: active_model.clone(),
         };
 
-        let _ = room_clone.typing_notice(true).await;
+        let _ = room_clone.typing(true).await;
 
         let result =
             execute_with_fallback(&config, state.clone(), &room_clone, context, &agent_name).await;
 
         match result {
             Ok(response) => {
-                let _ = room_clone.typing_notice(false).await;
+                let _ = room_clone.typing(false).await;
 
                 // Check for stop request again after long generation
                 {
@@ -1042,11 +920,7 @@ async fn run_interactive_loop(
                     if room_state.stop_requested {
                         room_state.stop_requested = false;
                         bot_state.save();
-                        let _ = room_clone
-                            .send(RoomMessageEventContent::text_markdown(
-                                "🛑 **Execution stopped by user.**",
-                            ))
-                            .await;
+                        let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.stop_requested).await;
                         break;
                     }
                 }
@@ -1093,12 +967,7 @@ async fn run_interactive_loop(
                 };
 
                 if let Some((filename, content)) = parse_write_file(&response) {
-                    let _ = room_clone
-                        .send(RoomMessageEventContent::text_markdown(format!(
-                            "💾 **Writing File**: `{}`",
-                            filename
-                        )))
-                        .await;
+                    let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.writing_file.replace("{}", &filename)).await;
 
                     let path = working_dir
                         .as_ref()
@@ -1112,23 +981,14 @@ async fn run_interactive_loop(
 
                     match fs::write(&path, &content) {
                         Ok(_) => {
-                            let _ = room_clone
-                                .send(RoomMessageEventContent::text_plain(
-                                    "✅ File written successfully.",
-                                ))
-                                .await;
+                            let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.file_written).await;
                             conversation_history.push_str(&format!(
                                 "\n\nAgent: {}\n\nSystem: File `{}` written successfully.",
                                 response, filename
                             ));
                         }
                         Err(e) => {
-                            let _ = room_clone
-                                .send(RoomMessageEventContent::text_plain(format!(
-                                    "❌ Failed to write file: {}",
-                                    e
-                                )))
-                                .await;
+                            let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.write_failed.replace("{}", &e.to_string())).await;
                             conversation_history.push_str(&format!(
                                 "\n\nAgent: {}\n\nSystem: Failed to write file `{}`: {}",
                                 response, filename, e
@@ -1173,24 +1033,19 @@ async fn run_interactive_loop(
                             .to_string();
 
                         // 3. Construct Final Message
-                        let final_msg = format!(
-                            "🏁 **Execution Complete**\n\n{}{}\n### 📋 Result\n{}",
-                            tasks_summary,
-                            if tasks_summary.is_empty() {
+                        let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.execution_complete
+                            .replace("{}", &tasks_summary)
+                            .replace("{}", if tasks_summary.is_empty() {
                                 "*(No tasks.md found or no tasks marked complete)*\n"
                             } else {
                                 ""
-                            },
-                            if final_comment.is_empty() {
+                            })
+                            .replace("{}", if final_comment.is_empty() {
                                 "*(No final comment provided)*"
                             } else {
                                 &final_comment
-                            }
-                        );
-
-                        let _ = room_clone
-                            .send(RoomMessageEventContent::text_markdown(final_msg))
-                            .await;
+                            })
+                        ).await;
 
                         // Mark task as completed but keep the description
                         let mut bot_state = state.lock().await;
@@ -1201,35 +1056,54 @@ async fn run_interactive_loop(
                         break;
                     }
 
-                    let _ = room_clone
-                        .send(RoomMessageEventContent::text_markdown(format!(
-                            "🤖 **Agent wants to run**:\n```\n{}\n```",
-                            content
-                        )))
-                        .await;
+                    let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.agent_run_code.replace("{}", &content)).await;
 
-                    let cmd_result = match run_command(&content, working_dir.as_deref()).await {
-                        Ok(o) => o,
-                        Err(e) => e,
+                    // Sandbox Check
+                    let sandbox = crate::sandbox::Sandbox::new(std::env::current_dir().unwrap_or_default());
+                    let permission = sandbox.check_command(&content, &config.commands);
+
+                    let cmd_result = match permission {
+                        crate::sandbox::PermissionResult::Allowed => {
+                            match run_command(&content, working_dir.as_deref()).await {
+                                Ok(o) => o,
+                                Err(e) => e,
+                            }
+                        },
+                        crate::sandbox::PermissionResult::Blocked(reason) => {
+                             let msg = format!("🚫 **Command Blocked**: {}", reason);
+                             let _ = room_clone.send_markdown(&msg).await;
+                             msg
+                        },
+                        crate::sandbox::PermissionResult::Ask(_reason) => {
+                             // 1. Save pending command & history
+                             {
+                                 let mut bot_state = state.lock().await;
+                                 let room_state = bot_state.get_room_state(room.room_id().as_str());
+                                 room_state.pending_command = Some(content.clone());
+                                 room_state.execution_history = Some(conversation_history.clone());
+                                 bot_state.save();
+                             }
+                             
+                             // 2. Notify
+                             let msg = crate::prompts::STRINGS.messages.command_approval_request.replace("{}", &content);
+                             let _ = room_clone.send_markdown(&msg).await;
+                             
+                             // 3. Pause Execution
+                             return;
+                        }
                     };
 
                     let display_output = if cmd_result.len() > 1000 {
-                        format!("{}... (truncated)", &cmd_result[..1000])
+                        crate::prompts::STRINGS.messages.output_truncated.replace("{}", &cmd_result[..1000])
                     } else {
                         cmd_result.clone()
                     };
-                    let _ = room_clone
-                        .send(RoomMessageEventContent::text_markdown(format!(
-                            "✅ **Output**:\n```\n{}\n```",
-                            display_output
-                        )))
-                        .await;
+                    let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.agent_output.replace("{}", &display_output)).await;
 
                     // Update history
-                    conversation_history.push_str(&format!(
-                        "\n\nAgent: {}\n\nSystem Command Output: {}",
-                        response, cmd_result
-                    ));
+                    conversation_history.push_str(&crate::prompts::STRINGS.prompts.agent_history_entry
+                        .replace("{}", &response)
+                        .replace("{}", &cmd_result));
 
                     // Persist history
                     {
@@ -1239,12 +1113,7 @@ async fn run_interactive_loop(
                         bot_state.save();
                     }
                 } else {
-                    let _ = room_clone
-                        .send(RoomMessageEventContent::text_markdown(format!(
-                            "🤔 **Agent says**:\n{}",
-                            response
-                        )))
-                        .await;
+                    let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.agent_says.replace("{}", &response)).await;
                     conversation_history.push_str(&format!("\n\nAgent: {}", response));
                     // Persist history even if just chatting
                     {
@@ -1256,12 +1125,7 @@ async fn run_interactive_loop(
                 }
             }
             Err(e) => {
-                let _ = room_clone
-                    .send(RoomMessageEventContent::text_plain(format!(
-                        "⚠️ Agent error: {}",
-                        e
-                    )))
-                    .await;
+                let _ = room_clone.send_plain(&format!("⚠️ Agent error: {}", e)).await;
                 break;
             }
         }
@@ -1269,29 +1133,25 @@ async fn run_interactive_loop(
 }
 
 /// Stops the current interactive execution loop.
-pub async fn handle_stop(state: Arc<Mutex<BotState>>, room: &Room) {
+pub async fn handle_stop(state: Arc<Mutex<BotState>>, room: &impl ChatService) {
     let mut bot_state = state.lock().await;
-    let room_state = bot_state.get_room_state(room.room_id().as_str());
+    let room_state = bot_state.get_room_state(&room.room_id());
     room_state.stop_requested = true;
     bot_state.save();
-    let _ = room
-        .send(RoomMessageEventContent::text_markdown(
-            "🛑 **Stop requested**. Waiting for current step to finish...",
-        ))
-        .await;
+    let _ = room.send_markdown(&crate::prompts::STRINGS.messages.stop_request_wait).await;
 }
 
 /// Approves the current plan and executes it using an agent in an interactive loop.
-pub async fn handle_approve(config: &AppConfig, state: Arc<Mutex<BotState>>, room: &Room) {
+pub async fn handle_approve<S: ChatService + Clone + Send + 'static>(config: &AppConfig, state: Arc<Mutex<BotState>>, room: &S) {
     let mut bot_state = state.lock().await;
-    let room_state = bot_state.get_room_state(room.room_id().as_str());
+    let room_state = bot_state.get_room_state(&room.room_id());
     if let Some(task) = &room_state.active_task {
         let working_dir = room_state.current_project_path.clone();
         let active_agent = room_state.active_agent.clone();
         let active_model = room_state.active_model.clone();
         let task_desc = task.clone();
 
-        let system_prompt = fs::read_to_string("system_prompt.md").unwrap_or_default();
+        let system_prompt = crate::prompts::STRINGS.prompts.system.clone();
         let plan_path = working_dir
             .as_ref()
             .map(|p| format!("{}/plan.md", p))
@@ -1303,14 +1163,12 @@ pub async fn handle_approve(config: &AppConfig, state: Arc<Mutex<BotState>>, roo
             .unwrap_or_else(|| "tasks.md".to_string());
         let tasks = fs::read_to_string(&tasks_path).unwrap_or_default();
 
-        let initial_history = format!(
-            "{}\n\nTask: {}\n\nPlan:\n{}\n\nTasks Checklist:\n{}\n\nYou are executing this plan. We will do this step-by-step.\n\nYou are currently in directory: `{}`",
-            system_prompt,
-            task_desc,
-            plan,
-            tasks,
-            working_dir.as_deref().unwrap_or("unknown")
-        );
+        let initial_history = crate::prompts::STRINGS.prompts.initial_history_context
+            .replace("{}", &system_prompt)
+            .replace("{}", &task_desc)
+            .replace("{}", &plan)
+            .replace("{}", &tasks)
+            .replace("{}", working_dir.as_deref().unwrap_or("unknown"));
 
         // Initialize state history
         room_state.execution_history = Some(initial_history.clone());
@@ -1321,12 +1179,7 @@ pub async fn handle_approve(config: &AppConfig, state: Arc<Mutex<BotState>>, roo
         let state_clone = state.clone();
 
         tokio::spawn(async move {
-            let _ = room_clone
-                .send(RoomMessageEventContent::text_markdown(format!(
-                    "✅ Plan approved for: **{}**\nStarting interactive execution...",
-                    task_desc
-                )))
-                .await;
+            let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.plan_approved.replace("{}", &task_desc)).await;
             run_interactive_loop(
                 config_clone,
                 state_clone,
@@ -1339,18 +1192,14 @@ pub async fn handle_approve(config: &AppConfig, state: Arc<Mutex<BotState>>, roo
             .await;
         });
     } else {
-        let _ = room
-            .send(RoomMessageEventContent::text_markdown(
-                "⚠️ **No task to approve**.",
-            ))
-            .await;
+        let _ = room.send_markdown(&crate::prompts::STRINGS.messages.no_task_approve).await;
     }
 }
 
 /// Resumes the interactive execution loop from where it left off.
-pub async fn handle_continue(config: &AppConfig, state: Arc<Mutex<BotState>>, room: &Room) {
+pub async fn handle_continue<S: ChatService + Clone + Send + 'static>(config: &AppConfig, state: Arc<Mutex<BotState>>, room: &S) {
     let mut bot_state = state.lock().await;
-    let room_state = bot_state.get_room_state(room.room_id().as_str());
+    let room_state = bot_state.get_room_state(&room.room_id());
 
     if let Some(history) = &room_state.execution_history {
         let working_dir = room_state.current_project_path.clone();
@@ -1363,11 +1212,7 @@ pub async fn handle_continue(config: &AppConfig, state: Arc<Mutex<BotState>>, ro
         let state_clone = state.clone();
 
         tokio::spawn(async move {
-            let _ = room_clone
-                .send(RoomMessageEventContent::text_markdown(
-                    "🔄 **Resuming execution**...",
-                ))
-                .await;
+            let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.resuming_execution).await;
             run_interactive_loop(
                 config_clone,
                 state_clone,
@@ -1380,20 +1225,16 @@ pub async fn handle_continue(config: &AppConfig, state: Arc<Mutex<BotState>>, ro
             .await;
         });
     } else {
-        let _ = room
-            .send(RoomMessageEventContent::text_markdown(
-                "⚠️ **No execution history found to continue**. Start a new task.",
-            ))
-            .await;
+        let _ = room.send_markdown(&crate::prompts::STRINGS.messages.no_history_continue).await;
     }
 }
 
 /// Unified start command.
 /// If history exists, it continues. If not, it approves/starts the current task.
-pub async fn handle_start(config: &AppConfig, state: Arc<Mutex<BotState>>, room: &Room) {
+pub async fn handle_start<S: ChatService + Clone + Send + 'static>(config: &AppConfig, state: Arc<Mutex<BotState>>, room: &S) {
     let should_continue = {
         let mut bot_state = state.lock().await;
-        let room_state = bot_state.get_room_state(room.room_id().as_str());
+        let room_state = bot_state.get_room_state(&room.room_id());
         room_state.execution_history.is_some()
     };
 
@@ -1405,14 +1246,14 @@ pub async fn handle_start(config: &AppConfig, state: Arc<Mutex<BotState>>, room:
 }
 
 /// Sends a direct chat message to the active agent.
-pub async fn handle_ask(
+pub async fn handle_ask<S: ChatService + Clone + Send + 'static>(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
     argument: &str,
-    room: &Room,
+    room: &S,
 ) {
     let mut bot_state = state.lock().await;
-    let room_state = bot_state.get_room_state(room.room_id().as_str());
+    let room_state = bot_state.get_room_state(&room.room_id());
 
     let working_dir = room_state.current_project_path.clone();
     let prompt = argument.to_string();
@@ -1427,9 +1268,9 @@ pub async fn handle_ask(
     drop(bot_state);
 
     tokio::spawn(async move {
-        let _ = room_clone.typing_notice(true).await;
+        let _ = room_clone.typing(true).await;
 
-        let agent_name = resolve_agent_name(active_agent.as_ref(), &config_clone);
+        let agent_name = resolve_agent_name(active_agent.as_deref(), &config_clone);
 
         let context = AgentContext {
             prompt,
@@ -1447,142 +1288,103 @@ pub async fn handle_ask(
         .await
         {
             Ok(out) => out,
-            Err(e) => format!("⚠️ **Error**: {}", e),
+            Err(e) => crate::prompts::STRINGS.messages.agent_error.replace("{}", &e),
         };
 
-        let _ = room_clone
-            .send(RoomMessageEventContent::text_markdown(response))
-            .await;
-        let _ = room_clone.typing_notice(false).await;
+        let _ = room_clone.send_markdown(&response).await;
+        let _ = room_clone.typing(false).await;
     });
 }
 
 /// Rejects the current plan and clears the active task for the current room.
-pub async fn handle_reject(state: Arc<Mutex<BotState>>, room: &Room) {
+pub async fn handle_reject(state: Arc<Mutex<BotState>>, room: &impl ChatService) {
     let mut bot_state = state.lock().await;
-    let room_state = bot_state.get_room_state(room.room_id().as_str());
+    let room_state = bot_state.get_room_state(&room.room_id());
     room_state.active_task = None;
     room_state.execution_history = None;
     bot_state.save();
-    let _ = room
-        .send(RoomMessageEventContent::text_markdown(
-            "❌ **Plan rejected**. Task cleared.",
-        ))
-        .await;
+    let _ = room.send_markdown(&crate::prompts::STRINGS.messages.plan_rejected).await;
 }
 
 /// Shows current git changes in the active project.
-pub async fn handle_changes(state: Arc<Mutex<BotState>>, room: &Room) {
+pub async fn handle_changes(state: Arc<Mutex<BotState>>, room: &impl ChatService) {
     let mut bot_state = state.lock().await;
-    let room_state = bot_state.get_room_state(room.room_id().as_str());
+    let room_state = bot_state.get_room_state(&room.room_id());
     let response = match run_command("git diff", room_state.current_project_path.as_deref()).await {
         Ok(o) => o,
         Err(e) => e,
     };
-    let _ = room
-        .send(RoomMessageEventContent::text_markdown(format!(
-            "🔍 **Current Changes**:\n```diff\n{}\n```",
-            response
-        )))
-        .await;
+    let _ = room.send_markdown(&crate::prompts::STRINGS.messages.current_changes_header.replace("{}", &response)).await;
 }
 
 /// Commits changes in the active project.
-pub async fn handle_commit(state: Arc<Mutex<BotState>>, argument: &str, room: &Room) {
+pub async fn handle_commit(state: Arc<Mutex<BotState>>, argument: &str, room: &impl ChatService) {
     let mut bot_state = state.lock().await;
-    let room_state = bot_state.get_room_state(room.room_id().as_str());
+    let room_state = bot_state.get_room_state(&room.room_id());
     if argument.is_empty() {
-        let _ = room
-            .send(RoomMessageEventContent::text_markdown(
-                "⚠️ **Please provide a commit message**: `.commit _message_`",
-            ))
-            .await;
+        let _ = room.send_markdown(&crate::prompts::STRINGS.messages.please_commit_msg).await;
     } else {
+        // Note: Git command construction is internal info, kept as format!
         let cmd = format!("git add . && git commit -m \"{}\"", argument);
         let resp = match run_command(&cmd, room_state.current_project_path.as_deref()).await {
             Ok(o) => o,
             Err(e) => e,
         };
-        let _ = room
-            .send(RoomMessageEventContent::text_markdown(format!(
-                "🚀 **Committed**:\n{}",
-                resp
-            )))
-            .await;
+        let _ = room.send_markdown(&crate::prompts::STRINGS.messages.committed_msg.replace("{}", &resp)).await;
     }
 }
 
 /// Discards uncommitted changes in the active project.
-pub async fn handle_discard(state: Arc<Mutex<BotState>>, room: &Room) {
+pub async fn handle_discard(state: Arc<Mutex<BotState>>, room: &impl ChatService) {
     let mut bot_state = state.lock().await;
-    let room_state = bot_state.get_room_state(room.room_id().as_str());
+    let room_state = bot_state.get_room_state(&room.room_id());
     let _ = run_command("git checkout .", room_state.current_project_path.as_deref()).await;
-    let _ = room
-        .send(RoomMessageEventContent::text_markdown(
-            "🧹 **Changes discarded**.",
-        ))
-        .await;
+    let _ = room.send_markdown(&crate::prompts::STRINGS.messages.changes_discarded).await;
 }
 
 /// Triggers a build of the project.
-pub async fn handle_build(_config: &AppConfig, state: Arc<Mutex<BotState>>, room: &Room) {
+pub async fn handle_build(_config: &AppConfig, state: Arc<Mutex<BotState>>, room: &impl ChatService) {
     let mut bot_state = state.lock().await;
-    let room_state = bot_state.get_room_state(room.room_id().as_str());
+    let room_state = bot_state.get_room_state(&room.room_id());
     let cmd = "cargo build";
 
-    let _ = room
-        .send(RoomMessageEventContent::text_markdown("🔨 **Building**..."))
-        .await;
+    let _ = room.send_markdown(&crate::prompts::STRINGS.messages.building_msg).await;
     let response = match run_command(cmd, room_state.current_project_path.as_deref()).await {
         Ok(o) => o,
         Err(e) => e,
     };
-    let _ = room
-        .send(RoomMessageEventContent::text_markdown(format!(
-            "🔨 **Build Result**:\n{}",
-            response
-        )))
-        .await;
+    let _ = room.send_markdown(&crate::prompts::STRINGS.messages.build_result.replace("{}", &response)).await;
 }
 
 /// Triggers a deployment of the project.
-pub async fn handle_deploy(_config: &AppConfig, state: Arc<Mutex<BotState>>, room: &Room) {
+pub async fn handle_deploy(_config: &AppConfig, state: Arc<Mutex<BotState>>, room: &impl ChatService) {
     let mut bot_state = state.lock().await;
-    let room_state = bot_state.get_room_state(room.room_id().as_str());
+    let room_state = bot_state.get_room_state(&room.room_id());
     // Use standard docker deploy if allowed, or hardcoded default
     let cmd = "docker compose up -d --build";
 
-    let _ = room
-        .send(RoomMessageEventContent::text_markdown(
-            "🚀 **Deploying**...",
-        ))
-        .await;
+    let _ = room.send_markdown(&crate::prompts::STRINGS.messages.deploying_msg).await;
     let response = match run_command(cmd, room_state.current_project_path.as_deref()).await {
         Ok(o) => o,
         Err(e) => e,
     };
-    let _ = room
-        .send(RoomMessageEventContent::text_markdown(format!(
-            "🚀 **Deploy Result**:\n{}",
-            response
-        )))
-        .await;
+    let _ = room.send_markdown(&crate::prompts::STRINGS.messages.deploy_result.replace("{}", &response)).await;
 }
 
 /// Shows current status of the bot.
-pub async fn handle_status(state: Arc<Mutex<BotState>>, room: &Room) {
+pub async fn handle_status(config: &AppConfig, state: Arc<Mutex<BotState>>, room: &impl ChatService) {
     let mut bot_state = state.lock().await;
-    let room_state = bot_state.get_room_state(room.room_id().as_str());
+    let room_state = bot_state.get_room_state(&room.room_id());
     let mut status = String::new();
 
     let current_path = room_state.current_project_path.as_deref().unwrap_or("None");
     let project_name = crate::util::get_project_name(current_path);
 
-    status.push_str("Use `.help` to list commands.\n");
+    status.push_str(&crate::prompts::STRINGS.messages.status_header);
     status.push_str(&format!("**Project**: `{}`\n", project_name));
     status.push_str(&format!(
         "**Agent**: `{}` | `{}`\n",
-        room_state.active_agent.as_deref().unwrap_or("None"),
+        resolve_agent_name(room_state.active_agent.as_deref(), config),
         room_state.active_model.as_deref().unwrap_or("None")
     ));
     let task_display = if room_state.is_task_completed {
@@ -1593,7 +1395,156 @@ pub async fn handle_status(state: Arc<Mutex<BotState>>, room: &Room) {
 
     status.push_str(&format!("**Task**: `{}`\n\n", task_display));
 
-    let _ = room
-        .send(RoomMessageEventContent::text_markdown(status))
-        .await;
+    let _ = room.send_markdown(&status).await;
+}
+
+/// Approves a pending command.
+pub async fn handle_ok<S: ChatService + Clone + Send + 'static>(config: &AppConfig, state: Arc<Mutex<BotState>>, room: &S) {
+    let (pending_cmd, history_opt, working_dir, active_agent, active_model) = {
+        let mut bot_state = state.lock().await;
+        let room_state = bot_state.get_room_state(&room.room_id());
+        
+        // Take pending command
+        let cmd = room_state.pending_command.take();
+        
+        let history = room_state.execution_history.clone();
+        let wd = room_state.current_project_path.clone();
+        let agent = room_state.active_agent.clone();
+        let model = room_state.active_model.clone();
+        
+        if cmd.is_some() {
+             bot_state.save();
+        }
+        (cmd, history, wd, agent, model)
+    };
+
+    if let Some(cmd) = pending_cmd {
+        if let Some(history) = history_opt {
+            let history_clone = history.clone();
+            let cmd_clone = cmd.clone();
+            
+            let room_clone = room.clone();
+            let config_clone = config.clone();
+            let state_clone = state.clone();
+
+            tokio::spawn(async move {
+                // We need to inject the command execution into the loop or just resume?
+                // Actually, run_interactive_loop expects a history string.
+                // If we restart the loop, it will prompt the agent again with the history.
+                // WE NEED TO MANUALLY RUN THE COMMAND FIRST, THEN UPDATE HISTORY, THEN RESUME LOOP.
+                
+                let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.resuming_execution).await;
+
+                // Execute the pending command
+                let cmd_result = match run_command(&cmd_clone, working_dir.as_deref()).await {
+                    Ok(o) => o,
+                    Err(e) => e,
+                };
+                
+                let display_output = if cmd_result.len() > 1000 {
+                   crate::prompts::STRINGS.messages.output_truncated.replace("{}", &cmd_result[..1000])
+                } else {
+                    cmd_result.clone()
+                };
+                let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.agent_output.replace("{}", &display_output)).await;
+                
+                let mut conversation_history = history_clone;
+                // We need to find the last agent message that proposed this command?
+                // The agent proposed it, we paused. The agent's proposal IS in the history (last message hopefully).
+                // Wait, if we paused, did we add the Agent's message to history? 
+                // In `run_interactive_loop`:
+                // `let _ = room_clone.send_markdown(agent_run_code)...`
+                // `PermissionResult::Ask` -> returns.
+                // We did NOT update `conversation_history` with the agent's text yet in that function block!
+                // The `conversation_history.push_str` happens at the END of the loop iteration.
+                
+                // Re-reading `run_interactive_loop`:
+                // It calls `extract_code`. If `Some`, it sends `agent_run_code`.
+                // Then logic... then `Sandbox Check`... `Ask` returns.
+                // The `conversation_history` is LOCAL to the loop until saved.
+                // We saved `execution_history = Some(conversation_history.clone())` inside `Ask`.
+                // BUT that `conversation_history` DOES NOT contains the latest agent response yet!
+                // Because `conversation_history.push_str` happens LATER (line 1092 in original file).
+                
+                // SO: We lost the Agent's text that triggered the command?
+                // `handle_ok` needs to append:
+                // 1. A reconstructed Agent message (since we might have lost the raw response if we didn't save it).
+                //    Wait, we save `pending_command`. We don't save `pending_agent_response`.
+                //    This uses `extract_code` from `response`.
+                
+                // CRITICAL FIX: We need to save the `response` (agent text) too?
+                // Or we just fake it: "Agent: <command code block>"
+                
+                // Let's modify `run_interactive_loop` to save `last_agent_response` too?
+                // PROBABLY BETTER: Append the Agent's part to history BEFORE checking sandbox?
+                // But if we block it, we might want to say "Command blocked".
+                
+                // Let's append manually here:
+                conversation_history.push_str(&format!("\n\nAgent: [Approved Command]\n```\n{}\n```\n\nSystem Command Output: {}", cmd_clone, cmd_result));
+                
+                // Now resume loop
+                run_interactive_loop(
+                    config_clone,
+                    state_clone,
+                    room_clone,
+                    conversation_history,
+                    working_dir,
+                    active_agent,
+                    active_model,
+                ).await;
+            });
+        }
+    } else {
+        let _ = room.send_markdown(&crate::prompts::STRINGS.messages.no_pending_command).await;
+    }
+}
+
+/// Denies a pending command.
+pub async fn handle_no<S: ChatService + Clone + Send + 'static>(config: &AppConfig, state: Arc<Mutex<BotState>>, room: &S) {
+    let (pending_cmd, history_opt, working_dir, active_agent, active_model) = {
+        let mut bot_state = state.lock().await;
+        let room_state = bot_state.get_room_state(&room.room_id());
+
+        let cmd = room_state.pending_command.take();
+        
+        let history = room_state.execution_history.clone();
+        let wd = room_state.current_project_path.clone();
+        let agent = room_state.active_agent.clone();
+        let model = room_state.active_model.clone();
+        
+        if cmd.is_some() {
+            bot_state.save();
+        }
+        (cmd, history, wd, agent, model)
+    };
+
+    if let Some(_) = pending_cmd {        
+        if let Some(history) = history_opt {
+            let history_clone = history.clone();
+            
+            let room_clone = room.clone();
+            let config_clone = config.clone();
+            let state_clone = state.clone();
+            
+             tokio::spawn(async move {
+                let _ = room_clone.send_markdown(&crate::prompts::STRINGS.messages.command_denied_user).await;
+                
+                let mut conversation_history = history_clone;
+                // Append denial
+                conversation_history.push_str(&format!("\n\nSystem: User denied the command execution. Ask for an alternative or stop."));
+                
+                 run_interactive_loop(
+                    config_clone,
+                    state_clone,
+                    room_clone,
+                    conversation_history,
+                    working_dir,
+                    active_agent,
+                    active_model,
+                ).await;
+             });
+        }
+    } else {
+         let _ = room.send_markdown(&crate::prompts::STRINGS.messages.no_pending_command).await;
+    }
 }

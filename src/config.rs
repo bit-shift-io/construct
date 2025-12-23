@@ -10,6 +10,7 @@ pub struct AppConfig {
     pub agents: AgentsConfig,
     #[serde(default)]
     pub bridges: HashMap<String, Vec<BridgeEntry>>,
+    #[allow(dead_code)]
     pub commands: CommandsConfig,
     #[serde(default)]
     pub system: SystemConfig,
@@ -36,6 +37,8 @@ fn default_command_mode() -> String {
 pub struct SystemConfig {
     #[serde(default)]
     pub projects_dir: Option<String>,
+    #[serde(default)]
+    pub action_delay: Option<u64>,
     #[serde(default)]
     pub admin: Vec<String>,
 }
@@ -77,6 +80,7 @@ pub struct AgentConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct MatrixConfig {
     #[serde(default)]
+    #[allow(dead_code)]
     pub protocol: String,
     pub username: String,
     pub password: String,

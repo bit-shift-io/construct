@@ -23,7 +23,7 @@ pub async fn run_command(command: &str, folder: Option<&str>) -> Result<String, 
         .current_dir(folder.unwrap_or("."))
         .output()
         .await
-        .map_err(|e| format!("Failed to run command: {}", e))?;
+        .map_err(|e| crate::prompts::STRINGS.messages.command_run_failed.replace("{}", &e.to_string()))?;
 
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -48,7 +48,7 @@ pub async fn run_shell_command(command: &str, folder: Option<&str>) -> Result<St
         .current_dir(folder.unwrap_or("."))
         .output()
         .await
-        .map_err(|e| format!("Failed to run shell command: {}", e))?;
+        .map_err(|e| crate::prompts::STRINGS.messages.shell_command_failed.replace("{}", &e.to_string()))?;
 
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())

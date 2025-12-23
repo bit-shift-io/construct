@@ -1,8 +1,7 @@
 use crate::config::AppConfig;
 use crate::state::BotState;
 use crate::util;
-use matrix_sdk::room::Room;
-use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
+use crate::services::ChatService;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -13,7 +12,7 @@ use tokio::sync::Mutex;
 pub async fn handle_command(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
-    room: &Room,
+    room: &impl ChatService,
     sender: &str,
     command_line: &str,
 ) {
@@ -22,12 +21,7 @@ pub async fn handle_command(
     let is_admin = config.system.admin.iter().any(|u| u.to_lowercase() == sender_lower);
 
     if !is_admin {
-        let _ = room
-            .send(RoomMessageEventContent::text_plain(format!(
-                "{} you do not have permission to run terminal commands.",
-                sender
-            )))
-            .await;
+        let _ = room.send_markdown(&crate::prompts::STRINGS.messages.admin_permission_denied.replace("{}", sender)).await;
         return;
     }
 
@@ -36,12 +30,12 @@ pub async fn handle_command(
         return;
     }
 
-    let _ = room.typing_notice(true).await;
+    let _ = room.typing(true).await;
 
     // Get Current Working Directory
     let cwd = {
         let mut bot_state = state.lock().await;
-        let room_state = bot_state.get_room_state(room.room_id().as_str());
+        let room_state = bot_state.get_room_state(&room.room_id());
         room_state.current_project_path.clone()
     };
 
@@ -99,68 +93,23 @@ pub async fn handle_command(
         if let Ok(canon) = std::fs::canonicalize(&new_path) {
             if canon.starts_with(&root_canon) {
                 let mut bot_state = state.lock().await;
-                let room_state = bot_state.get_room_state(room.room_id().as_str());
+                let room_state = bot_state.get_room_state(&room.room_id());
                 room_state.current_project_path = Some(canon.to_string_lossy().to_string());
                 bot_state.save();
                 
-                let _ = room
-                .send(RoomMessageEventContent::text_markdown(format!(
-                    "📂 **Directory changed**: `{}`",
-                    canon.to_string_lossy()
-                )))
-                .await;
+                let _ = room.send_markdown(&crate::prompts::STRINGS.messages.directory_changed.replace("{}", &canon.to_string_lossy())).await;
             } else {
-                 let _ = room
-                .send(RoomMessageEventContent::text_plain(
-                    "❌ Access denied: Path outside the sandbox."
-                ))
-                .await;
+                 let _ = room.send_markdown(&crate::prompts::STRINGS.messages.access_denied_sandbox).await;
             }
         } else {
-             let _ = room
-            .send(RoomMessageEventContent::text_plain(format!(
-                "❌ Directory not found."
-            )))
-            .await;
+             let _ = room.send_markdown(&crate::prompts::STRINGS.messages.directory_not_found).await;
         }
         
-        let _ = room.typing_notice(false).await;
+        let _ = room.typing(false).await;
         return;
     }
 
-    // Command Permission Check
-    // Admin commands should still respect blocked list? 
-    // "Allowed" list is for AGENT/USER?
-    // "Admin" usually implies FULL access. 
-    // BUT user said "implement command permissions...".
-    // "Allowed commands should execute freely... Blocked commands rejected".
-    // Does this apply to ADMIN or just Agent?
-    // Usually Admin overrides. But for safety, maybe check blocked?
-    // The previous code in bridge.rs DID check permissions.
-    // I will preserve the existing logic: Check permissions.
-    
-    let projects_root = config.system.projects_dir.clone().unwrap_or_else(|| ".".to_string());
-    let sandbox = crate::sandbox::Sandbox::new(projects_root);
-    
-    match sandbox.check_command(command, &config.commands) {
-        crate::sandbox::PermissionResult::Blocked(msg) => {
-            let _ = room
-                .send(RoomMessageEventContent::text_plain(format!("⛔ {}", msg)))
-                .await;
-             let _ = room.typing_notice(false).await;
-            return;
-        },
-        crate::sandbox::PermissionResult::Ask(msg) => {
-             let _ = room
-                .send(RoomMessageEventContent::text_markdown(format!(
-                    "⚠️ **Permission Required**: {}\n\n(Interactive approval not yet implemented. Please add to `allowed` list or use a different command.)", msg
-                )))
-                .await;
-             let _ = room.typing_notice(false).await;
-            return;
-        },
-        crate::sandbox::PermissionResult::Allowed => {}
-    }
+
 
     let output = match util::run_shell_command(command, cwd.as_deref()).await {
         Ok(o) => o,
@@ -168,15 +117,11 @@ pub async fn handle_command(
     };
 
     let display_output = if output.trim().is_empty() {
-        "✅ (Command executed successfully, no output)".to_string()
+        crate::prompts::STRINGS.messages.command_no_output.clone()
     } else {
-        format!("```\n{}\n```", output)
+        crate::prompts::STRINGS.messages.code_block_output.replace("{}", &output)
     };
 
-    let _ = room
-        .send(RoomMessageEventContent::text_markdown(
-            display_output
-        ))
-        .await;
-    let _ = room.typing_notice(false).await;
+    let _ = room.send_markdown(&display_output).await;
+    let _ = room.typing(false).await;
 }

@@ -94,9 +94,14 @@ impl Agent for UnifiedAgent {
                         let hours = duration.num_hours();
                         let minutes = duration.num_minutes() % 60;
 
-                        format!("Out of usage for this model: {} (Rate limit exceeded. Resets in approx. {}h {}m at midnight PT)", model_name, hours, minutes)
+                        crate::prompts::STRINGS.messages.gemini_quota_exceeded
+                            .replace("{}", &model_name)
+                            .replace("{}", &hours.to_string())
+                            .replace("{}", &minutes.to_string())
                     } else if err_msg.contains("404") {
-                        format!("{} (Hint: Check if 'Generative Language API' is enabled in Google Cloud Console, and ensure you are using an AI Studio key, not Vertex AI. Model: {})", err_msg, model_name)
+                        crate::prompts::STRINGS.messages.gemini_api_hint
+                            .replace("{}", &err_msg)
+                            .replace("{}", &model_name)
                     } else {
                         err_msg
                     }
@@ -129,16 +134,16 @@ impl Agent for UnifiedAgent {
                     .form(&[("text", &context.prompt)])
                     .send()
                     .await
-                    .map_err(|e| format!("DeepAI Request Failed: {}", e))?;
+                    .map_err(|e| crate::prompts::STRINGS.messages.deepai_request_failed.replace("{}", &e.to_string()))?;
 
                 if !resp.status().is_success() {
-                    return Err(format!("DeepAI API Error: {}", resp.status()));
+                    return Err(crate::prompts::STRINGS.messages.deepai_api_error.replace("{}", &resp.status().to_string()));
                 }
 
                 let body: DeepAIResponse = resp
                     .json()
                     .await
-                    .map_err(|e| format!("DeepAI Parse Error: {}", e))?;
+                    .map_err(|e| crate::prompts::STRINGS.messages.deepai_parse_error.replace("{}", &e.to_string()))?;
                 Ok(body.output)
             }
             "copilot" | "github_copilot" => {
@@ -180,7 +185,7 @@ impl Agent for UnifiedAgent {
                     .await
                     .map_err(|e| e.to_string())
             }
-            _ => Err(format!("Unsupported Unified provider: {}", self.provider)),
+            _ => Err(crate::prompts::STRINGS.messages.unsupported_provider.replace("{}", &self.provider)),
         }
     }
 
