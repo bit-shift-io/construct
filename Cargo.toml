@@ -11,7 +11,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 serde_json = "1.0"
 async-trait = "0.1.89"
-rig-core = "0.6.0"
+rig-core = { git = "https://github.com/Gibbz/rig.git", branch = "feature/zai-provider" }
 lazy_static = "1.4"
 reqwest = { version = "0.11", features = ["json"] }
 chrono = "0.4"
+regex = "1.12.2"

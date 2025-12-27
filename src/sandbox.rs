@@ -54,19 +54,61 @@ impl Sandbox {
     }
 
     /// Checks if a command binary is allowed/blocked.
+    /// Handles chained commands (&&, ||, ;, |) and detects subshells.
     pub fn check_command(&self, command_line: &str, config: &CommandsConfig) -> PermissionResult {
-        let parts: Vec<&str> = command_line.split_whitespace().collect();
-        if parts.is_empty() {
-            return PermissionResult::Allowed; // Empty command does nothing
+        // 1. Detect potentially dangerous sub-shell execution that we can't easily parse
+        if command_line.contains("$(") || command_line.contains('`') {
+            return PermissionResult::Ask(format!(
+                "Complex subshell execution detected in: {}", 
+                command_line
+            ));
+        }
+
+        // 2. Split into individual commands respecting quotes
+        let commands = self.split_shell_commands(command_line);
+        if commands.is_empty() {
+             return PermissionResult::Allowed;
+        }
+
+        let mut final_result = PermissionResult::Allowed;
+
+        // 3. Check EACH command in the chain
+        for cmd in commands {
+             let parts: Vec<&str> = cmd.split_whitespace().collect();
+             if parts.is_empty() { 
+                 continue; 
+             }
+             
+             // Handle sudo prefix - check the actual command
+             let binary = if parts[0] == "sudo" && parts.len() > 1 {
+                 parts[1]
+             } else {
+                 parts[0]
+             };
+
+             // Check status for this specific binary
+             let result = self.check_single_binary(binary, config);
+             
+             match result {
+                 PermissionResult::Blocked(msg) => {
+                     // If ANY part is blocked, the whole chain is blocked immediately
+                     return PermissionResult::Blocked(msg);
+                 },
+                 PermissionResult::Ask(msg) => {
+                     // If ANY part needs asking, we upgrade the final result to Ask
+                     // (unless we later hit a Blocked, which we check first)
+                     final_result = PermissionResult::Ask(msg);
+                 },
+                 PermissionResult::Allowed => {
+                     // If Allowed, continue checking others
+                 }
+             }
         }
         
-        // Handle sudo prefix - check the actual command
-        let binary = if parts[0] == "sudo" && parts.len() > 1 {
-            parts[1]
-        } else {
-            parts[0]
-        };
+        final_result
+    }
 
+    fn check_single_binary(&self, binary: &str, config: &CommandsConfig) -> PermissionResult {
         // 1. Check Blocked
         if config.blocked.iter().any(|b| b == binary) {
             return PermissionResult::Blocked(crate::prompts::STRINGS.messages.command_blocked.replace("{}", binary));
@@ -88,6 +130,50 @@ impl Sandbox {
             "block" => PermissionResult::Blocked(crate::prompts::STRINGS.messages.command_not_allowed.replace("{}", binary)),
             _ => PermissionResult::Ask(crate::prompts::STRINGS.messages.command_unknown.replace("{}", binary)),
         }
+    }
+
+    /// Helper to split shell chains like "cmd1 && cmd2 | cmd3" respecting quotes.
+    fn split_shell_commands(&self, input: &str) -> Vec<String> {
+        let mut parts = Vec::new();
+        let mut current = String::new();
+        let mut in_single = false;
+        let mut in_double = false;
+        let mut chars = input.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            match c {
+                '\'' if !in_double => in_single = !in_single,
+                '"' if !in_single => in_double = !in_double,
+                _ => {
+                    if !in_single && !in_double {
+                        // Separators: ; | &
+                        // We treat '&&', '||', '|', '&', ';' as split points
+                        if c == ';' {
+                            if !current.trim().is_empty() { parts.push(current.trim().to_string()); }
+                            current.clear();
+                            continue;
+                        }
+                        if c == '|' {
+                            if chars.peek() == Some(&'|') { chars.next(); } // consume ||
+                            if !current.trim().is_empty() { parts.push(current.trim().to_string()); }
+                            current.clear();
+                            continue;
+                        }
+                        if c == '&' {
+                            if chars.peek() == Some(&'&') { chars.next(); } // consume &&
+                            if !current.trim().is_empty() { parts.push(current.trim().to_string()); }
+                            current.clear();
+                            continue;
+                        }
+                    }
+                }
+            }
+            current.push(c);
+        }
+        if !current.trim().is_empty() {
+            parts.push(current.trim().to_string());
+        }
+        parts
     }
 
     /// Rewrites the output to hide the real root path.

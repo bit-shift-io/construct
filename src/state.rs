@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::sync::Arc;
+use tokio::sync::watch;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum WizardStep {
@@ -41,12 +43,26 @@ pub struct RoomState {
     #[serde(default)]
     pub last_model_list: Vec<String>,
     #[serde(default)]
+    pub last_agent_list: Vec<String>,
+    #[serde(default)]
     pub is_task_completed: bool,
+    #[serde(skip)]
+    pub abort_handle: Option<Arc<watch::Sender<bool>>>,
     #[serde(default)]
     pub wizard: WizardState,
     #[serde(default)]
     pub model_cooldowns: HashMap<String, i64>, // "agent:model" -> timestamp
+    #[serde(default)]
+    pub last_request_times: HashMap<String, i64>, // "agent" -> timestamp of last request start
     pub pending_command: Option<String>,
+    #[serde(default)]
+    pub pending_agent_response: Option<String>,
+    #[serde(default)]
+    pub last_command: Option<String>,
+    #[serde(default)]
+    pub command_retry_count: u32,
+    #[serde(default)]
+    pub last_message_event_id: Option<String>,
 }
 
 /// Persistent state of the bot, mapping Room IDs to their respective room states.
@@ -55,12 +71,17 @@ pub struct RoomState {
 pub struct BotState {
     #[serde(default)]
     pub rooms: HashMap<String, RoomState>,
+    #[serde(default)]
+    #[serde(skip)] // Do not persist transient rate limits
+    pub last_provider_usage: HashMap<String, u64>, // timestamp millis
 }
 
 impl BotState {
     /// Gets or creates the state for a specific room.
     pub fn get_room_state(&mut self, room_id: &str) -> &mut RoomState {
-        self.rooms.entry(room_id.to_string()).or_insert_with(RoomState::default)
+        self.rooms
+            .entry(room_id.to_string())
+            .or_insert_with(RoomState::default)
     }
     /// Loads the state from `data/state.json` or returns default.
     pub fn load() -> Self {

@@ -115,42 +115,19 @@ pub async fn handle_input<S: ChatService + Clone + Send + 'static>(
                  return;
             }
             update_data(state.clone(), room, "name", &name).await;
-            advance_step(state.clone(), room, WizardStep::ProjectType).await;
+            // SKIP Type/Stack, go straight to Description
+            advance_step(state.clone(), room, WizardStep::Description).await;
         }
-        Some(WizardStep::ProjectType) => {
-             // 1. App, 2. Lib, 3. CLI, 4. Web
-             let val = match input.trim() {
-                 "1" | "app" => Some("Application"),
-                 "2" | "lib" => Some("Library"),
-                 "3" | "cli" => Some("CLI Tool"),
-                 "4" | "web" => Some("Web Site/App"),
-                 _ => None,
-             };
-             
-             if let Some(v) = val {
-                 update_data(state.clone(), room, "type", v).await;
-                 advance_step(state.clone(), room, WizardStep::Stack).await;
-             } else {
-                  let _ = room.send_markdown("❌ Invalid selection. Please select 1-4.").await;
-                  render_step(state, room).await;
-             }
-        }
-        Some(WizardStep::Stack) => {
-             // 1. Rust, 2. Python, 3. TypeScript, 4. Go, 5. Custom
-             let val = match input.trim() {
-                 "1" | "rust" => "Rust",
-                 "2" | "python" => "Python",
-                 "3" | "ts" | "typescript" => "TypeScript",
-                 "4" | "go" => "Go",
-                 val => val, // Treat as custom
-             };
-             update_data(state.clone(), room, "stack", val).await;
+        // REMOVED: ProjectType and Stack steps
+        Some(WizardStep::ProjectType) | Some(WizardStep::Stack) => {
+             // Fallback if state somehow gets here
              advance_step(state.clone(), room, WizardStep::Description).await;
         }
         Some(WizardStep::Description) => {
              if input.trim() == ".ok" {
                   // Finalize description
-                  advance_step(state.clone(), room, WizardStep::Confirmation).await;
+                  // SKIP Confirmation, go straight to finish
+                  finish_wizard(config, state.clone(), room).await;
              } else {
                   // Append to buffer
                   append_buffer(state.clone(), room, input).await;
@@ -222,13 +199,9 @@ async fn render_step<S: ChatService>(state: Arc<Mutex<BotState>>, room: &S) {
         }
         Some(WizardStep::Description) => {
             if buffer_len == 0 {
-                crate::prompts::STRINGS.wizard.description.clone()
+                // Modified prompt to include tech stack info
+                "**📝 Project Description**\n\nDescribe your project. **Please include the programming language and tech stack you want to use.**\n\nType `.ok` to finish and create the project.".to_string()
             } else {
-                // Continuation prompt, maybe minimal
-                // Actually we don't spam on every message in description phase. 
-                // Only if entering the phase.
-                // We'll rely on "advance_step" calling this.
-                // If we are already in description phase and just appended, we don't call render_step.
                 return; 
             }
         }
@@ -284,37 +257,57 @@ async fn finish_wizard<S: ChatService + Clone + Send + 'static>(config: &AppConf
         return;
     }
 
-    let (name, ptype, stack, desc) = {
+    let (name, desc) = {
         let mut bot_state = state.lock().await;
         let room_state = bot_state.get_room_state(&room.room_id());
         let d = &room_state.wizard.data;
         let desc = room_state.wizard.buffer.clone();
         
         let n = d.get("name").unwrap_or(&"unnamed".to_string()).clone();
-        let t = d.get("type").unwrap_or(&"app".to_string()).clone();
-        let s = d.get("stack").unwrap_or(&"rust".to_string()).clone();
         
         // Reset wizard
         room_state.wizard = WizardState::default();
         bot_state.save();
         
-        (n, t, s, desc)
+        (n, desc)
     };
-    
-    // Construct the task arguments for the agent
-    let prompt = crate::prompts::STRINGS.prompts.new_project_prompt
-        .replace("{}", &ptype)
-        .replace("{}", &name)
-        .replace("{}", &stack)
-        .replace("{}", &desc);
-    
-    // Trigger .new / .task logic
-    // We reuse commands::handle_new (which creates dir) AND commands::handle_task (which generates plan).
-    // Or we just call handle_new then handle_task.
     
     // 1. Create Project Dir
     // Replaced create_new_project with handle_new
     crate::commands::handle_new(config, state.clone(), &name, room).await;
+    
+    // Retrieve the just-created project path
+    let (project_path, projects_dir) = {
+        let mut bot_state = state.lock().await;
+        let room_state = bot_state.get_room_state(&room.room_id());
+        (
+            room_state.current_project_path.clone().unwrap_or_else(|| ".".to_string()),
+            config.system.projects_dir.clone().unwrap_or_default()
+        )
+    };
+
+    // Sanitize path to be relative to projects directory (fake sandbox path)
+    // We want /r8 (root of projects dir) so we strip projects_dir
+    let display_path = if !projects_dir.is_empty() {
+        let prefix_to_strip = projects_dir.clone();
+
+        if !prefix_to_strip.is_empty() && project_path.starts_with(&prefix_to_strip) {
+             project_path[prefix_to_strip.len()..].to_string()
+        } else {
+             project_path.clone()
+        }
+    } else {
+        project_path
+    };
+    
+    // Ensure it looks like a path
+    let display_path = if display_path.is_empty() { "/".to_string() } else { display_path };
+
+    // Construct the task arguments for the agent
+    let prompt = crate::prompts::STRINGS.prompts.new_project_prompt
+        .replace("{NAME}", &name)
+        .replace("{REQUIREMENTS}", &desc)
+        .replace("{WORKDIR}", &display_path);
     
     // 2. Start Task
     crate::commands::handle_task(config, state.clone(), &prompt, room).await;

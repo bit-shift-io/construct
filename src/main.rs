@@ -1,15 +1,16 @@
 #![recursion_limit = "256"]
 
-mod agent;
 mod admin;
+mod agent;
 mod bridge;
 mod commands;
 mod config;
+mod message_helper;
 mod sandbox;
+mod services;
 mod state;
 mod util;
 mod wizard;
-mod services;
 
 use anyhow::{Context, Result};
 use matrix_sdk::{
@@ -30,8 +31,8 @@ use tokio::sync::Mutex;
 
 use crate::bridge::BridgeManager;
 use crate::config::AppConfig;
-use crate::state::BotState;
 use crate::services::matrix::MatrixService;
+use crate::state::BotState;
 use std::time::SystemTime;
 
 /// Static configuration and state managers.
@@ -57,7 +58,10 @@ async fn main() -> Result<()> {
 
     println!(
         "{}",
-        crate::prompts::STRINGS.logs.config_loaded.replace("{}", &config.services.matrix.username)
+        crate::prompts::STRINGS
+            .logs
+            .config_loaded
+            .replace("{}", &config.services.matrix.username)
     );
 
     // 3. Setup Matrix Client
@@ -80,9 +84,21 @@ async fn main() -> Result<()> {
 
     // 5. Update Display Name if configured
     if let Some(display_name) = &config.services.matrix.display_name {
-        println!("{}", crate::prompts::STRINGS.logs.setting_display_name.replace("{}", display_name));
+        println!(
+            "{}",
+            crate::prompts::STRINGS
+                .logs
+                .setting_display_name
+                .replace("{}", display_name)
+        );
         if let Err(e) = client.account().set_display_name(Some(display_name)).await {
-            eprintln!("{}", crate::prompts::STRINGS.logs.set_display_name_fail.replace("{}", &e.to_string()));
+            eprintln!(
+                "{}",
+                crate::prompts::STRINGS
+                    .logs
+                    .set_display_name_fail
+                    .replace("{}", &e.to_string())
+            );
         }
     }
 
@@ -132,7 +148,13 @@ async fn main() -> Result<()> {
     let sync_handle = tokio::spawn(async move {
         println!("{}", crate::prompts::STRINGS.logs.sync_loop_start);
         if let Err(e) = sync_client.sync(SyncSettings::default()).await {
-            eprintln!("{}", crate::prompts::STRINGS.logs.sync_loop_fail.replace("{}", &e.to_string()));
+            eprintln!(
+                "{}",
+                crate::prompts::STRINGS
+                    .logs
+                    .sync_loop_fail
+                    .replace("{}", &e.to_string())
+            );
         }
     });
 
@@ -142,7 +164,13 @@ async fn main() -> Result<()> {
     // 8. Graceful Shutdown
     match tokio::signal::ctrl_c().await {
         Ok(()) => println!("{}", crate::prompts::STRINGS.logs.shutdown),
-        Err(err) => eprintln!("{}", crate::prompts::STRINGS.logs.shutdown_fail.replace("{}", &err.to_string())),
+        Err(err) => eprintln!(
+            "{}",
+            crate::prompts::STRINGS
+                .logs
+                .shutdown_fail
+                .replace("{}", &err.to_string())
+        ),
     }
 
     sync_handle.abort();
@@ -153,19 +181,39 @@ async fn main() -> Result<()> {
 async fn setup_bridges(client: &Client, config: &AppConfig, state: Arc<Mutex<BotState>>) {
     for (bridge_name, entries) in &config.bridges {
         for entry in entries {
-            if entry.service == "matrix" {
+            if entry.service.as_deref() == Some("matrix") {
                 if let Some(room_id_str) = &entry.channel {
-                    println!("{}", crate::prompts::STRINGS.logs.bridge_joining.replace("{}", bridge_name).replace("{}", room_id_str));
+                    println!(
+                        "{}",
+                        crate::prompts::STRINGS
+                            .logs
+                            .bridge_joining
+                            .replace("{}", bridge_name)
+                            .replace("{}", room_id_str)
+                    );
 
                     if let Ok(room_id) = RoomId::parse(room_id_str) {
                         if let Err(e) = client.join_room_by_id(&room_id).await {
-                            eprintln!("{}", crate::prompts::STRINGS.logs.bridge_join_fail.replace("{}", room_id_str).replace("{}", &e.to_string()));
+                            eprintln!(
+                                "{}",
+                                crate::prompts::STRINGS
+                                    .logs
+                                    .bridge_join_fail
+                                    .replace("{}", room_id_str)
+                                    .replace("{}", &e.to_string())
+                            );
                         } else if let Some(room) = client.get_room(&room_id) {
-                            println!("{}", crate::prompts::STRINGS.logs.bridge_join_success.replace("{}", room_id_str));
+                            println!(
+                                "{}",
+                                crate::prompts::STRINGS
+                                    .logs
+                                    .bridge_join_success
+                                    .replace("{}", room_id_str)
+                            );
 
-                             // Send status message instead of welcome message
-                             let service = MatrixService::new(room);
-                             crate::commands::handle_status(&config, state.clone(), &service).await;
+                            // Send status message instead of welcome message
+                            let service = MatrixService::new(room);
+                            crate::commands::handle_status(&config, state.clone(), &service).await;
                         }
                     }
                 }
@@ -177,9 +225,21 @@ async fn setup_bridges(client: &Client, config: &AppConfig, state: Arc<Mutex<Bot
 /// Handles incoming room invitations.
 async fn handle_invites(event: StrippedRoomMemberEvent, room: Room) {
     if event.content.membership == MembershipState::Invite {
-        println!("{}", crate::prompts::STRINGS.logs.invite_received.replace("{}", &format!("{:?}", room.room_id())));
+        println!(
+            "{}",
+            crate::prompts::STRINGS
+                .logs
+                .invite_received
+                .replace("{}", &format!("{:?}", room.room_id()))
+        );
         if let Err(e) = room.join().await {
-            eprintln!("{}", crate::prompts::STRINGS.logs.join_invite_fail.replace("{}", &e.to_string()));
+            eprintln!(
+                "{}",
+                crate::prompts::STRINGS
+                    .logs
+                    .join_invite_fail
+                    .replace("{}", &e.to_string())
+            );
         } else {
             println!("{}", crate::prompts::STRINGS.logs.join_invite_success);
         }

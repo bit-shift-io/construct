@@ -1,7 +1,7 @@
 use crate::commands;
 use crate::config::AppConfig;
-use crate::state::BotState;
 use crate::services::ChatService;
+use crate::state::BotState;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -15,22 +15,26 @@ pub struct BridgeManager {
 impl BridgeManager {
     /// Creates a new BridgeManager instance.
     pub fn new(config: AppConfig, state: Arc<Mutex<BotState>>) -> Self {
-        Self {
-            config,
-            state,
-        }
+        Self { config, state }
     }
 
     /// Dispatches a message to the appropriate handler.
     pub async fn dispatch<S: ChatService + Clone + Send + 'static>(
-        &self, 
-        room: &S, 
-        sender: &str, 
-        msg_body: &str
+        &self,
+        room: &S,
+        sender: &str,
+        msg_body: &str,
     ) {
         // Handle admin shell commands
         if msg_body.starts_with(',') {
-            crate::admin::handle_command(&self.config, self.state.clone(), room, sender, msg_body[1..].trim()).await;
+            crate::admin::handle_command(
+                &self.config,
+                self.state.clone(),
+                room,
+                sender,
+                msg_body[1..].trim(),
+            )
+            .await;
             return;
         }
 
@@ -50,6 +54,14 @@ impl BridgeManager {
 
         // Support only . as command prefix for other commands
         if !msg_body.starts_with('.') {
+            // User sent a non-command message - reset last message tracking
+            // so the next bot response will be a new message instead of editing
+            {
+                let mut bot_state = self.state.lock().await;
+                let room_state = bot_state.get_room_state(&room.room_id());
+                room_state.last_message_event_id = None;
+                bot_state.save();
+            }
             return;
         }
 
@@ -59,7 +71,12 @@ impl BridgeManager {
 
         // Check permissions for help context
         let sender_lower = sender.to_lowercase();
-        let is_admin = self.config.system.admin.iter().any(|u| u.to_lowercase() == sender_lower);
+        let is_admin = self
+            .config
+            .system
+            .admin
+            .iter()
+            .any(|u| u.to_lowercase() == sender_lower);
 
         match trigger {
             "help" => commands::handle_help(&self.config, self.state.clone(), room, is_admin).await,
@@ -69,12 +86,14 @@ impl BridgeManager {
             "set" => commands::handle_set(&self.config, self.state.clone(), argument, room).await,
             "list" => commands::handle_list(&self.config, room).await,
             "agents" => commands::handle_agents(&self.config, self.state.clone(), room).await,
+            "agent" => {
+                commands::handle_agent(&self.config, self.state.clone(), argument, room).await
+            }
+            "models" => commands::handle_models(&self.config, self.state.clone(), room).await,
             "model" => commands::handle_model(self.state.clone(), argument, room).await,
             "read" => commands::handle_read(self.state.clone(), argument, room).await,
             "new" => commands::handle_new(&self.config, self.state.clone(), argument, room).await,
-            "task" => {
-                commands::handle_task(&self.config, self.state.clone(), argument, room).await
-            }
+            "task" => commands::handle_task(&self.config, self.state.clone(), argument, room).await,
             "modify" => {
                 commands::handle_modify(&self.config, self.state.clone(), argument, room).await
             }
@@ -91,6 +110,7 @@ impl BridgeManager {
             "discard" => commands::handle_discard(self.state.clone(), room).await,
             "build" => commands::handle_build(&self.config, self.state.clone(), room).await,
             "deploy" => commands::handle_deploy(&self.config, self.state.clone(), room).await,
+            "check" => commands::handle_check(&self.config, self.state.clone(), room).await,
             "status" => commands::handle_status(&self.config, self.state.clone(), room).await,
             _ => {
                 // Ignore unknown dot commands

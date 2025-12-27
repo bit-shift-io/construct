@@ -34,12 +34,12 @@ pub struct PromptStrings {
     pub task_requirements_prompt: String,
     pub new_project_prompt: String,
     pub roadmap_template: String,
-    pub architecture_template: String,
     pub changelog_template: String,
     pub roadmap_context: String,
-    pub architecture_context: String,
     pub initial_history_context: String,
+    #[allow(dead_code)]
     pub agent_history_entry: String,
+    pub interactive_turn: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -88,6 +88,8 @@ pub struct MessageStrings {
     pub please_commit_msg: String,
     pub committed_msg: String,
     pub changes_discarded: String,
+    pub checking_msg: String,
+    pub check_result: String,
     pub building_msg: String,
     pub build_result: String,
     pub deploying_msg: String,
@@ -159,9 +161,8 @@ pub struct Strings {
 
 lazy_static! {
     pub static ref STRINGS: Strings = {
-        let content = fs::read_to_string("res/strings.yaml")
-            .expect("Failed to read res/strings.yaml");
-        serde_yaml::from_str(&content)
-            .expect("Failed to parse res/strings.yaml")
+        let content =
+            fs::read_to_string("res/strings.yaml").expect("Failed to read res/strings.yaml");
+        serde_yaml::from_str(&content).expect("Failed to parse res/strings.yaml")
     };
 }

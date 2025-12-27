@@ -1,7 +1,7 @@
 help:
   main: |
     **🤖 Construct Help**
-    Usage: .command _args_
+    Use: .command _args_
 
     **📂 Project**
     * new [name]: Reset/create project
@@ -12,19 +12,21 @@ help:
     * start: Start/resume tasks
     * stop: Stop tasks
 
-    ** Git**
+    **🐙 Git**
     * changes
     * commit [msg]
     * discard
 
-    ** Build**
+    **🔨 Build**
     * check
     * build
     * deploy
 
     **⚡ Misc**
     * , [cmd]: Terminal command
-    * agents: list agents/models
+    * agents: list agents
+    * agent [id]: set agent
+    * models: list models
     * model [id]: set model
     * ask [msg]: Chat with agent
     * set [k] [v]
@@ -45,46 +47,47 @@ wizard:
 
 prompts:
   system: |
-    # Agent Matrix System Prompt
+    # Construct System Prompt
 
-    You are an AI Coding Agent acting as a cooperative collaborator over Matrix. Your goal is to help users manage their projects, track tasks, and execute code changes.
-
-    ## Operation Mode
-    - You communicate primarily through a Matrix chat.
-    - You listen for commands starting with `.` or `!`.
-    - You manage project state (current working directory, active tasks).
-
-    ## Workflow
-    1. **Project Selection**: Use `.project <name>` to set the active project.
-    2. **Task Creation**: Use `.task <description>` to define a new objective.
-    3. **Planning**: When a task is set, generate a `plan.md` in the project directory and post it to the chat for approval.
-    4. **Execution**: Upon `.approve`, execute the changes described in the plan.
-    5. **Completion**: Once finished, generate a `walkthrough.md` summarizing the changes and post it.
-    6. **Review**: Listen for `.modify`, `.reject`, `.commit`, or `.discard`.
+    You are an AI Coding Agent acting as a cooperative collaborator over Matrix.
+    Your goal is to execute code changes to fulfill the user's Task.
 
     ## Rules
     - Be concise and technical.
     - Always verify your changes if possible (build/test).
     - Do not make assumptions; ask for clarification if a task is ambiguous.
-    - Maintain a `tasks.md` file in the project root to track progress.
+    - Maintain a `tasks.md` file in the project root to track progress. Mark tasks as `[x]` when completed.
+    - Maintain a `walkthrough.md` file to document changes and verification results.
+    - **ERROR HANDLING**: If a command fails (Exit Code != 0), DO NOT retry it blindly.
+      - Do NOT put "WRITE_FILE:" inside the code block. It must be on the line BEFORE the block.
+    - Start the tool output immediately.
+      - If unclear, ask the user for help.
+    - **VERIFICATION**: Don't trust; verify.
+      - After running a command that generates files, run `ls` or `cat` to confirm existence.
+      - Only proceed if expected artifacts are present.
+      - Only proceed if expected artifacts are present.
 
-    ## Command Reference
-    - `.help`: Show available commands.
-    - `.project <path>`: Set the current working directory.
-    - `.task <description>`: Start a new task.
-    - `.plan`: Show the current `plan.md`.
-    - `.approve`: Approve the current plan and start execution.
-    - `.reject`: Reject the current plan.
-    - `.modify <feedback>`: Refine the plan based on feedback.
-    - `.walkthrough`: Show the latest `walkthrough.md`.
-    - `.commit`: Commit the changes to git.
-    - `.discard`: Revert changes.
+    ## Best Practices
+    - **Debugging**: Follow a structured approach: Assess (Context) -> Reproduce (Steps) -> Fix (Minimal) -> Verify (Test).
+    - **Rust Standards**:
+      - Avoid anti-patterns: `clone()` (borrow instead), `unwrap()` (handle errors), `unsafe` (avoid).
+      - Treat lints seriously; trace root causes before suppressing.
+    - **Verification**: Run `cargo check` and `cargo test` after every change.
+    - **Completeness**: Do not rely on assumptions. Verify every step.
+    - **Command Line Best Practices**:
+      - NO INTERACTIVE TOOLS: DO NOT use `nano`, `vim`, `vi`, `less`, `more`, `top`.
+      - Use `WRITE_FILE` to create/edit files.
+      - Use `READ_FILE` to read files (safer than cat).
+      - Use `LIST_DIR` to list files (cleaner than ls).
+      - Use `CHANGE_DIR` to change the working directory (persists across commands).
+      - Use `grep` to search.
+    - **Dependency Management**: ALWAYS use package managers (e.g., `cargo add`, `npm install`, `pip install`) instead of manually editing configuration files (e.g., `Cargo.toml`, `package.json`).
 
   task_instructions: |
-    1. Use the 'Project Roadmap' and 'Architecture' above for understanding the big picture and constraints.
+    1. Use the 'Project Roadmap' above for understanding the big picture and constraints.
     2. Your scope is STRICTLY limited to the 'Task' described above. Do NOT try to complete other roadmap items.
     3. Generate two files:
-       - `plan.md`: A detailed technical plan for THIS specific task.
+       - `plan.md`: A detailed but CONCISE technical plan for THIS specific task.
        - `tasks.md`: A checklist of the subtasks for THIS specific task.
 
   task_format: |
@@ -99,7 +102,7 @@ prompts:
     ```
 
   new_project_instructions: |
-    4. **NEW PROJECT DETECTED**: You MUST also generate `roadmap.md` and `architecture.md` based on the task requirements to replace the default placeholders.
+    4. **NEW PROJECT DETECTED**: You MUST also generate `roadmap.md` based on the task requirements to replace the default placeholders.
 
   new_project_format: |
 
@@ -109,45 +112,67 @@ prompts:
     ```
 
   modify_plan: |
-    {}
+    {SYSTEM}
 
-    Original Task: {}
+    Original Task: {TASK}
 
     Current Plan:
-    {}
+    {PLAN}
 
-    Feedback: {}
+    Feedback: {FEEDBACK}
 
     Please update the plan.md based on the feedback.
 
     IMPORTANT: Return the content of plan.md in a code block.
 
   task_requirements_prompt: "Task Requirements:\n\n{}"
-  new_project_prompt: "Create a new {} project named '{}' using {}.\n\nRequirements:\n{}"
+  new_project_prompt: "Create a new project named '{NAME}'. \n\nGoal: Comprehensive implementation of the following requirements.\n\nRequirements:\n{REQUIREMENTS}\n\nIMPORTANT: The project directory is ALREADY created. You are ALREADY inside it (`{WORKDIR}`). Do NOT run `mkdir` or `cd`."
 
   initial_history_context: |
-    {}
+    Task: {TASK}
 
-    Task: {}
-
-    Plan:
-    {}
+    Current Plan:
+    {PLAN}
 
     Tasks Checklist:
-    {}
+    {TASKS}
 
     You are executing this plan. We will do this step-by-step.
 
-    You are currently in directory: `{}`
+    You are currently in directory: {WORKDIR}
 
   agent_history_entry: "\n\nAgent: {}\n\nSystem Command Output: {}"
 
+  interactive_turn: |
+    {CWD}
+
+    # Project Context
+    ## Roadmap
+    {ROADMAP}
+
+    ## Tasks
+    {TASKS}
+
+    # Current Status
+    Based on the plan and previous outputs, what is the NEXT single command to run?
+
+    ## RULES
+    1. Check if `tasks.md` needs to be updated (mark completed items with `[x]`). If so, WRITE IT FIRST.
+    2. Check if `walkthrough.md` needs to be updated with new changes or verification results. If so, WRITE IT.
+    3. Return the command in a code block, e.g., ```bash\nls -la\n```.
+    4. To create/edit a file, return the content in a code block and place `WRITE_FILE: <filename>` on the line BEFORE the code block.
+    5. If you are finished with the entire plan, return a code block with the text `DONE`.
+    6. Do not output multiple commands in one turn unless chained with `&&`.
+    7. Wait for the result before proceeding.
+    8. CRITICAL: Do NOT put commentary or explanations inside the code block. ONLY the command itself. Conversational text belongs outside the code block.
+    9. NEVER use interactive tools (`nano`, `vim`, `less`). Use `WRITE_FILE`, `READ_FILE` or `LIST_DIR`.
+    10. Do NOT put "WRITE_FILE:" / "READ_FILE:" inside the code block. It must be on the line BEFORE the block.
+    11. Use `CHANGE_DIR: <path>` to change directory.
+
   # Templates
   roadmap_template: "# Roadmap\n\n- [ ] Initial Setup"
-  architecture_template: "# Architecture\n\n- Overview: ..."
   changelog_template: "# Changelog\n\n## 0.1.0\n- Initialized"
   roadmap_context: "\n\n### Project Roadmap (Context Only)\n{}\n"
-  architecture_context: "\n\n### Architecture (Context Only)\n{}\n"
 
 messages:
   status_header: "**📊 System Status**\n\n"
@@ -171,7 +196,7 @@ messages:
   provider_error_agent_switch: "⚠️ Provider Error: {err} \n🔄 Switching Agent: {from} -> {to}"
   write_plan_error: "⚠️ Failed to write plan.md: {}"
   write_tasks_error: "⚠️ Failed to write tasks.md: {}"
-  feedback_modification: "🔄 Modifying plan with feedback: *{}*"
+  feedback_modification: "🔄 Modifying plan with feedback: *{FEEDBACK}*"
   failed_modify: "⚠️ **Failed to modify plan**:\n{}"
   plan_updated: "📜 **Plan Updated**:\n\n{}"
   limit_reached: "⚠️ **Limit Reached**: Stopped to prevent infinite loop."
@@ -193,6 +218,8 @@ messages:
   please_commit_msg: "⚠️ **Please provide a commit message**: `.commit _message_`"
   committed_msg: "🚀 **Committed**:\n{}"
   changes_discarded: "🧹 **Changes discarded**."
+  checking_msg: "🔍 **Checking**..."
+  check_result: "🔍 **Check Result**:\n{}"
   building_msg: "🔨 **Building**..."
   build_result: "🔨 **Build Result**:\n{}"
   deploying_msg: "🚀 **Deploying**..."
@@ -200,7 +227,7 @@ messages:
   code_block_output: "```\n{}\n```"
 
   # Sandbox / Util
-  command_blocked: "Command '{}' is explicitly blocked."
+  command_blocked: "Command '{}' is explicitly blocked. Please use a safer alternative (e.g., READ_FILE, LIST_DIR, WRITE_FILE, grep)."
   command_ask: "Command '{}' requires confirmation."
   command_not_allowed: "Command '{}' is not in allowlist."
   command_unknown: "Unknown command '{}' (default policy is ask)."
@@ -229,11 +256,11 @@ messages:
   no_projects_configured: "⚠️ No `projects_dir` configured."
   provide_project_name: "⚠️ **Please provide a project name**: `.new _name_`"
   project_exists: "📂 **Project already exists**. Switched to: `{}`\nSpecs detected."
-  create_dir_failed: "\n❌ **Failed to create directory** `{}`: {}"
-  project_created: "\n📂 **Created and set project directory to**: `{}`\n📄 **Initialized specs**: `roadmap.md`, `architecture.md`, `changelog.md`"
+  create_dir_failed: "\n❌ **Failed to create directory** `{PATH}`: {ERR}"
+  project_created: "\n📂 **Created and set project directory to**: `{}`\n📄 **Initialized specs**: `roadmap.md`, `changelog.md`"
   use_task_to_start: "\n\nUse `.task` to start a new workflow."
   task_started: "📝 Task started: **{}**\nGenerating plan..."
-  plan_generated: "### Plan\n\n{}\n\n### Tasks generated.{}\n"
+  plan_generated: "### Plan\n\n{PLAN}\n\n### Tasks generated.{TASKS}\n"
   plan_generation_failed: "⚠️ **Failed to generate plan**:\n{}"
   no_active_task_modify: "⚠️ No active task to modify. Use `.task` first."
   current_changes_header: "🔍 **Current Changes**:\n```diff\n{}\n```"

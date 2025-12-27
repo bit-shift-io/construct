@@ -1,48 +1,199 @@
-# Copy this to data/config.yaml and fill in your credentials.
+# ============================================================================
+# Construct AI Bot Configuration Example
+# ============================================================================
+# Copy this file to data/config.yaml and customize it for your setup.
+#
+# Setup Instructions:
+#   1. Create data directory: mkdir -p data
+#   2. Copy this file: cp config_example.yaml data/config.yaml
+#   3. Edit data/config.yaml with your credentials
+#   4. Set your API keys as environment variables (see below)
+#   5. Run: cargo run
+# ============================================================================
 
-# Root directory for new projects (optional)
+# ----------------------------------------------------------------------------
+# System Configuration
+# ----------------------------------------------------------------------------
 system:
-  projects_dir: "/home/bob/Projects"
+  # Base directory for projects. Used by `.list` command.
+  # Optional but recommended for easier project navigation.
+  projects_dir: "/home/user/Projects"
+
+  # Admin users who can execute raw shell commands with `, <command>`
+  # Must be full Matrix usernames (e.g., "@user:matrix.org")
   admin:
-    - "@bob:matrix.org"
+    - "@admin:matrix.org"
 
-# Agents configuration
+# ----------------------------------------------------------------------------
+# AI Agent Configuration
+# ----------------------------------------------------------------------------
+# Each agent needs:
+#   - protocol: The provider to use
+#   - model: Specific model (optional, has defaults)
+#   - API key as environment variable (see provider docs below)
+#
+# Available protocols: zai, gemini, claude, anthropic, openai, groq, xai, deepai
+# ----------------------------------------------------------------------------
+
 agents:
-  # gemini_cli:
-  #   model: "gemini-1.5-flash"
-  #   # Requires GEMINI_API_KEY environment variable
+  # ==========================================================================
+  # ZAI Provider (GLM Models - Recommended)
+  # ==========================================================================
+  # Zai provides access to General Language Models through an Anthropic-compatible API.
+  # Models: glm-4.7 (flagship), glm-4.6 (200K context), glm-4.5 series
+  # API Key: Set ZAI_API_KEY environment variable
+  # Documentation: https://github.com/Gibbz/rig/tree/feature/zai-provider
+  #
+  # zai:
+  #   protocol: "zai"
+  #   model: "glm-4.7"  # Optional, defaults to glm-4.7
+  #   # Requires: export ZAI_API_KEY="your-api-key"
+  #
+  # Available Zai Models:
+  #   - glm-4.7      (default, 64K tokens, best for complex tasks)
+  #   - glm-4.6      (64K tokens, 200K context, high performance)
+  #   - glm-4.5      (32K tokens, general purpose)
+  #   - glm-4.5-x    (32K tokens, enhanced)
+  #   - glm-4.5-air  (32K tokens, lightweight)
+  #   - glm-4.5-airx (32K tokens, ultra-lightweight)
+  #   - glm-4.5-flash (8K tokens, fastest)
 
-  # claude_cli:
+  # ==========================================================================
+  # Gemini Provider (Google)
+  # ==========================================================================
+  # Supports dynamic model discovery and automatic fallbacks.
+  # API Key: Set GEMINI_API_KEY environment variable
+  #
+  # gemini:
+  #   protocol: "gemini"
+  #   model: "gemini-1.5-flash"  # Starting model
+  #   requests_per_minute: 10    # Rate limiting (optional)
+  #
+  #   # Optional: Prioritize models using regex patterns
+  #   model_order:
+  #     - "flash"  # Prefer models with 'flash' in name
+  #     - "pro"    # Then try models with 'pro'
+  #
+  #   # Optional: Explicit fallbacks if discovery fails
+  #   model_fallbacks:
+  #     - "gemini-1.5-flash"
+  #     - "gemini-1.5-pro"
+  #   # Requires: export GEMINI_API_KEY="your-api-key"
+
+  # ==========================================================================
+  # Groq Provider (Fast Inference)
+  # ==========================================================================
+  # Ultra-fast inference with Llama models.
+  # API Key: Set GROQ_API_KEY environment variable
+  #
+  # groq:
+  #   protocol: "groq"
+  #   model: "llama-3.3-70b-versatile"
+  #   requests_per_minute: 30
+  #   # Requires: export GROQ_API_KEY="your-api-key"
+
+  # ==========================================================================
+  # Claude/Anthropic Provider
+  # ==========================================================================
+  # Anthropic's Claude models.
+  # API Key: Set ANTHROPIC_API_KEY environment variable
+  #
+  # claude:
+  #   protocol: "claude"  # or "anthropic"
   #   model: "claude-3-5-sonnet-20241022"
-  #   # Requires ANTHROPIC_API_KEY environment variable
+  #   # Requires: export ANTHROPIC_API_KEY="your-api-key"
 
-  # copilot_cli:
-  #   command: "github-copilot-cli" # Copilot still uses CLI wrapper
-  #   model: "gpt-4"
+  # ==========================================================================
+  # OpenAI Provider
+  # ==========================================================================
+  # OpenAI's GPT models.
+  # API Key: Set OPENAI_API_KEY environment variable
+  #
+  # openai:
+  #   protocol: "openai"
+  #   model: "gpt-4o"
+  #   # Requires: export OPENAI_API_KEY="your-api-key"
 
+  # ==========================================================================
+  # xAI Provider (Grok)
+  # ==========================================================================
+  # xAI's Grok models.
+  # API Key: Set XAI_API_KEY environment variable
+  #
+  # xai:
+  #   protocol: "xai"
+  #   model: "grok-beta"
+  #   # Requires: export XAI_API_KEY="your-api-key"
+
+  # ==========================================================================
+  # DeepAI Provider (Legacy/Fallback)
+  # ==========================================================================
+  # Basic AI models for simple tasks.
+  # API Key: Set DEEPAI_API_KEY environment variable
+  #
+  # deepai:
+  #   protocol: "deepai"
+  #   model: "standard"
+  #   # Requires: export DEEPAI_API_KEY="your-api-key"
+
+# ----------------------------------------------------------------------------
+# Service Configuration
+# ----------------------------------------------------------------------------
 services:
+  # Matrix (chat) service configuration
   matrix:
-    username: "@bot:matrix.org"
-    password: "your_password"
+    username: "@your_bot:matrix.org"
+    password: "your_matrix_password"
     homeserver: "https://matrix.org"
-    display_name: "Agent Matrix" # Optional: The bot's display name
+    display_name: "Construct AI Bot" # Optional: Bot's display name
     protocol: "matrix" # Optional, defaults to empty string
 
-# Bridges connect Matrix channels to external services or agent workflows
+# ----------------------------------------------------------------------------
+# Bridge Configuration
+# ----------------------------------------------------------------------------
+# Bridges connect Matrix rooms to AI agents and workflows.
+# Each bridge has a name and can route to specific agents or use defaults.
+# ----------------------------------------------------------------------------
 bridges:
+  # Example: Development room with Zai as default agent
   "Development":
     - service: "matrix"
-      channel: "!room_id_1:matrix.org"
-    - service: "google_cli"
+      channel: "!room_id_1:matrix.org" # Replace with actual room ID
+    - service: "zai" # Default agent for this room
+
+  # Example: Staging room restricted to specific agents
   "Staging":
     - service: "matrix"
-      channel: "!room_id_2:matrix.org"
+      channel: "!room_id_2:matrix.org" # Replace with actual room ID
+    - agents: # Only these agents can be used in this room
+        - "gemini"
+        - "groq"
 
-# Command permissions and sandbox
+  # Example: Testing room with Groq
+  "Testing":
+    - service: "matrix"
+      channel: "!room_id_3:matrix.org" # Replace with actual room ID
+    - service: "groq"
+
+# ----------------------------------------------------------------------------
+# Command Permissions
+# ----------------------------------------------------------------------------
+# Control which shell commands can be executed through the bot.
+# Modes:
+#   - ask: Prompt user for confirmation (default, safe)
+#   - allow: Execute without confirmation
+#   - block: Never execute
+# ----------------------------------------------------------------------------
 commands:
-  default: "ask" # "ask", "allow", "block"
+  default: "ask" # Default mode for commands not listed
+
+  # Commands that require user confirmation
   ask:
     - "sudo"
+    - "rm"
+    - "mv"
+
+  # Always allowed commands (safe to execute)
   allowed:
     - "ls"
     - "cat"
@@ -50,5 +201,38 @@ commands:
     - "cd"
     - "pwd"
     - "git"
+    - "echo"
+    - "head"
+    - "tail"
+    - "wc"
+    - "read"
+    - "find"
+    - "sed"
+    - "awk"
+
+  # Blocked commands (never allowed, even for admins)
   blocked:
     - "su"
+    - "passwd"
+    - "chmod 777"
+
+# ============================================================================
+# Quick Start Guide
+# ============================================================================
+# 1. Set your API keys:
+#    export ZAI_API_KEY="your-zai-key"
+#    export GEMINI_API_KEY="your-gemini-key"  # if using Gemini
+#
+# 2. Update the configuration:
+#    - Uncomment your preferred agent(s) under "agents:"
+#    - Update Matrix credentials under "services:"
+#    - Add your room IDs under "bridges:"
+#    - Set admin users under "system:"
+#
+# 3. Run the bot:
+#    cargo run
+#
+# 4. Invite the bot to your Matrix rooms
+#
+# 5. Start with .status to verify, then .ask for questions
+# ============================================================================

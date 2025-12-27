@@ -1,5 +1,5 @@
-use async_trait::async_trait;
 use anyhow::Result;
+use async_trait::async_trait;
 
 pub mod matrix;
 
@@ -8,11 +8,17 @@ pub trait ChatService: Send + Sync {
     /// Returns the unique identifier for the room/channel.
     fn room_id(&self) -> String;
 
-    /// Sends a markdown formatted message.
-    async fn send_markdown(&self, content: &str) -> Result<()>;
+    /// Sends a markdown formatted message and returns the event ID.
+    async fn send_markdown(&self, content: &str) -> Result<String>;
 
-    /// Sends a plain text message.
-    async fn send_plain(&self, content: &str) -> Result<()>;
+    /// Sends a plain text message and returns the event ID.
+    async fn send_plain(&self, content: &str) -> Result<String>;
+
+    /// Edits a message by event ID.
+    async fn edit_markdown(&self, event_id: &str, new_content: &str) -> Result<()>;
+
+    /// Edits the last sent markdown message (if tracked).
+    async fn edit_last_markdown(&self, content: &str) -> Result<()>;
 
     /// Sets the typing status.
     async fn typing(&self, active: bool) -> Result<()>;

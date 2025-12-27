@@ -46,8 +46,9 @@ pub struct SystemConfig {
 /// Represents a specific bridge entry connecting a service to a channel.
 #[derive(Debug, Deserialize, Clone)]
 pub struct BridgeEntry {
-    pub service: String,
+    pub service: Option<String>,
     pub channel: Option<String>,
+    pub agents: Option<Vec<String>>,
 }
 
 /// Configuration for various connected services.
@@ -73,7 +74,13 @@ pub struct AgentConfig {
     #[serde(default)]
     pub models: Option<Vec<String>>, // List of models to cycle through
     #[serde(default)]
+    pub model_order: Option<Vec<String>>, // Regex patterns for ordering discovered models
+    #[serde(default)]
+    pub model_fallbacks: Option<Vec<String>>, // Explicit fallback models if discovery fails
+    #[serde(default)]
     pub fallback_agent: Option<String>, // Agent to switch to if all models fail
+    #[serde(default)]
+    pub requests_per_minute: Option<u64>,
 }
 
 /// Specific configuration for the Matrix service.
