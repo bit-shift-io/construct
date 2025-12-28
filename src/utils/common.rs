@@ -8,12 +8,8 @@ pub fn get_project_name(path: &str) -> &str {
 
 #[derive(Debug, PartialEq)]
 pub enum AgentAction {
-    WriteFile(String, String), // filename, content
-    ChangeDir(String),         // path
-    ReadFile(String),          // path
-    ListDir(String),           // path
-    ShellCommand(String),
-    Done,
+    ShellCommand(String), // All sandboxed system commands
+    Done,                 // Completion signal
 }
 
 pub fn parse_actions(response: &str) -> Vec<AgentAction> {
@@ -33,86 +29,12 @@ pub fn parse_actions(response: &str) -> Vec<AgentAction> {
             let content = content.trim().to_string();
 
             if !content.is_empty() {
-                // Check context before the block for WRITE_FILE
-                // We look at the text between the previous block (or start) and this block
-                let pre_context = &response[current_pos..abs_start];
-
-                // We look for "WRITE_FILE:" occurring before the block.
-                // It should be on the line immediately preceding the block (ignoring potential empty lines/whitespace)
-
-                let is_write_file = if let Some(idx) = pre_context.rfind("WRITE_FILE:") {
-                    // Check if there is only whitespace between "WRITE_FILE: <filename>" line and the code block
-                    let after_found = &pre_context[idx..]; // "WRITE_FILE: filename \n \n"
-                    // We expect "WRITE_FILE: ..." then newline then ```
-
-                    // Find end of the WRITE_FILE line
-                    if let Some(line_end) = after_found.find('\n') {
-                        let between_line_and_block = &after_found[line_end..];
-                        between_line_and_block.trim().is_empty()
-                    } else {
-                        // WRITE_FILE line goes straight to end of string? Unlikely if ``` follows
-                        after_found.trim().is_empty() // Fail safe
-                    }
-                } else {
-                    false
-                };
-
-                if is_write_file {
-                    if let Some(idx) = pre_context.rfind("WRITE_FILE:") {
-                        let after_key = &pre_context[idx + 11..]; // skip "WRITE_FILE:"
-                        let line_end = after_key.find('\n').unwrap_or(after_key.len());
-                        let filename = after_key[..line_end].trim().to_string();
-                        actions.push(AgentAction::WriteFile(filename, content));
-                    }
-                } else if content.trim().starts_with("WRITE_FILE:") {
-                    // Fallback: Check if WRITE_FILE is INSIDE the block
-                    let mut inner_lines = content.lines();
-                    if let Some(first_line) = inner_lines.next() {
-                        let filename = first_line.replace("WRITE_FILE:", "").trim().to_string();
-                        let file_content = inner_lines.collect::<Vec<&str>>().join("\n");
-                        actions.push(AgentAction::WriteFile(filename, file_content));
-                    }
-                } else if content.trim().starts_with("CHANGE_DIR:") {
-                    if let Some(first_line) = content.lines().next() {
-                        let path = first_line.replace("CHANGE_DIR:", "").trim().to_string();
-                        actions.push(AgentAction::ChangeDir(path));
-                    }
-                } else if content.trim().starts_with("READ_FILE:") {
-                    if let Some(first_line) = content.lines().next() {
-                        let path = first_line.replace("READ_FILE:", "").trim().to_string();
-                        actions.push(AgentAction::ReadFile(path));
-                    }
-                } else if content.trim().starts_with("LIST_DIR") {
-                    // Check for "LIST_DIR" or "LIST_DIR:" or "LIST_DIR <path>"
-                    let trimmed = content.trim();
-                    let path_part = if trimmed.starts_with("LIST_DIR:") {
-                        trimmed.replacen("LIST_DIR:", "", 1)
-                    } else if trimmed.starts_with("LIST_DIR ") {
-                        trimmed.replacen("LIST_DIR", "", 1)
-                    } else if trimmed == "LIST_DIR" {
-                        String::new()
-                    } else {
-                        // Fallback? probably not LIST_DIR then
-                        trimmed.to_string()
-                    };
-
-                    let path = path_part.trim().to_string();
-                    let final_path = if path.is_empty() {
-                        ".".to_string()
-                    } else {
-                        path
-                    };
-                    actions.push(AgentAction::ListDir(final_path));
-                } else {
-                    if content == "DONE" {
-                        actions.push(AgentAction::Done);
-                    } else if content.contains("**System Command Output:**")
-                        || content.contains("System Command Output:")
-                    {
-                        // Ignore hallucinated system headers
-                    } else {
-                        actions.push(AgentAction::ShellCommand(content));
-                    }
+                if content == "DONE" || content.contains("echo DONE") {
+                    actions.push(AgentAction::Done);
+                } else if !content.contains("**System Command Output:**")
+                    && !content.contains("System Command Output:")
+                {
+                    actions.push(AgentAction::ShellCommand(content));
                 }
             }
 

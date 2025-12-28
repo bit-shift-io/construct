@@ -101,6 +101,35 @@ pub async fn execute_with_fallback(
 }
 
 /// Shared logic for the interactive execution loop.
+/// Helper function to track directory changes safely
+async fn track_directory_change(
+    cmd: &str,
+    working_dir: &Option<String>,
+    state: Arc<Mutex<BotState>>,
+    room_id: &str,
+) -> Option<String> {
+    let new_dir = cmd.trim()[3..].trim();
+    let resolved_path = if new_dir.starts_with('/') {
+        new_dir.to_string()
+    } else if let Some(wd) = working_dir {
+        format!("{}/{}", wd, new_dir)
+    } else {
+        new_dir.to_string()
+    };
+
+    // Validate and update working directory
+    if let Ok(canonical) = fs::canonicalize(&resolved_path) {
+        let path_str = canonical.to_string_lossy().to_string();
+        let mut bot_state = state.lock().await;
+        let room_state = bot_state.get_room_state(room_id);
+        room_state.current_project_path = Some(path_str.clone());
+        bot_state.save();
+        Some(path_str)
+    } else {
+        None
+    }
+}
+
 pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
     config: AppConfig,
     state: Arc<Mutex<BotState>>,
@@ -290,12 +319,9 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                 }
 
                 for action in actions {
-                    // Action processing logic (WriteFile, Done, ShellCommand, ChangeDir, ReadFile, ListDir)
-                    // ... (omitted for tool call length, will insert via separate call?)
-                    // Actually I MUST include logic for ShellCommand as it has the Pause/Resume logic!
                     match action {
                         crate::utils::AgentAction::ShellCommand(content) => {
-                            // ... Feed updates ...
+                            // Update feed with new command
                             feed_manager.process_action(&crate::utils::AgentAction::ShellCommand(
                                 content.clone(),
                             ));
@@ -305,20 +331,38 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                                     .await;
                             }
 
-                            // Circuit breaker ...
-
-                            // Sandbox
+                            // Enhanced sandbox validation with file operation checks
                             let sandbox = crate::utils::sandbox::Sandbox::new(
                                 std::env::current_dir().unwrap_or_default(),
                             );
-                            let permission = sandbox.check_command(&content, &config.commands);
+                            let permission =
+                                sandbox.check_file_operation(&content, &config.commands);
 
                             let cmd_result = match permission {
                                 crate::utils::sandbox::PermissionResult::Allowed => {
-                                    // ... (cd logic + execution)
-                                    match crate::utils::run_shell_command(
+                                    // Track directory changes for cd commands
+                                    if content.trim().starts_with("cd ") {
+                                        if let Some(new_path) = track_directory_change(
+                                            &content,
+                                            &working_dir,
+                                            state.clone(),
+                                            &room_clone.room_id(),
+                                        )
+                                        .await
+                                        {
+                                            working_dir = Some(new_path);
+                                        }
+                                    }
+
+                                    // Execute with intelligent timeout
+                                    let timeout_duration =
+                                        crate::commands::system::get_command_timeout(
+                                            &content, &config,
+                                        );
+                                    match crate::utils::run_shell_command_with_timeout(
                                         &content,
                                         working_dir.as_deref(),
+                                        Some(timeout_duration),
                                     )
                                     .await
                                     {
@@ -361,20 +405,29 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                                     // AWAIT INPUT
                                     if let Some(d) = input_rx.recv().await {
                                         if d == "ok" {
-                                            // Resumed
-                                            {
-                                                let mut bot_state = state.lock().await;
-                                                let room_state = bot_state
-                                                    .get_room_state(room.room_id().as_str());
-                                                room_state.pending_command = None;
-                                                room_state.pending_agent_response = None;
-                                                room_state.feed_manager =
-                                                    Some(feed_manager.clone());
-                                                bot_state.save();
+                                            // Track directory changes if approved
+                                            if content.trim().starts_with("cd ") {
+                                                if let Some(new_path) = track_directory_change(
+                                                    &content,
+                                                    &working_dir,
+                                                    state.clone(),
+                                                    &room_clone.room_id(),
+                                                )
+                                                .await
+                                                {
+                                                    working_dir = Some(new_path);
+                                                }
                                             }
-                                            match crate::utils::run_command(
+
+                                            // Execute with intelligent timeout
+                                            let timeout_duration =
+                                                crate::commands::system::get_command_timeout(
+                                                    &content, &config,
+                                                );
+                                            match crate::utils::run_shell_command_with_timeout(
                                                 &content,
                                                 working_dir.as_deref(),
+                                                Some(timeout_duration),
                                             )
                                             .await
                                             {
@@ -431,203 +484,6 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                                 room_state.is_task_completed = true;
                                 room_state.cleanup_after_task();
                                 bot_state.save();
-                            }
-                            return;
-                        }
-
-                        crate::utils::AgentAction::WriteFile(path, content) => {
-                            feed_manager.process_action(&crate::utils::AgentAction::WriteFile(
-                                path.clone(),
-                                content.clone(),
-                            ));
-                            if let Some(eid) = feed_manager.get_event_id() {
-                                let _ = room_clone
-                                    .edit_markdown(eid, &feed_manager.get_feed_content())
-                                    .await;
-                            }
-
-                            let target_path = if let Some(wd) = &working_dir {
-                                format!("{}/{}", wd, path)
-                            } else {
-                                path.clone()
-                            };
-
-                            if let Some(parent) = std::path::Path::new(&target_path).parent() {
-                                let _ = fs::create_dir_all(parent);
-                            }
-
-                            match fs::write(&target_path, &content) {
-                                Ok(_) => {
-                                    let msg = format!("✅ Written to `{}`", path);
-                                    feed_manager.update_with_output(&msg, false);
-                                    if let Some(eid) = feed_manager.get_event_id() {
-                                        let _ = room_clone
-                                            .edit_markdown(eid, &feed_manager.get_feed_content())
-                                            .await;
-                                    }
-                                    conversation_history.push_str(&format!(
-                                        "\n\nSystem: File {} written successfully.",
-                                        path
-                                    ));
-                                }
-                                Err(e) => {
-                                    let msg = format!("❌ Failed to write `{}`: {}", path, e);
-                                    feed_manager.update_with_output(&msg, true);
-                                    if let Some(eid) = feed_manager.get_event_id() {
-                                        let _ = room_clone
-                                            .edit_markdown(eid, &feed_manager.get_feed_content())
-                                            .await;
-                                    }
-                                    conversation_history.push_str(&format!(
-                                        "\n\nSystem: Failed to write {}: {}",
-                                        path, e
-                                    ));
-                                }
-                            }
-                        }
-                        crate::utils::AgentAction::ReadFile(path) => {
-                            feed_manager
-                                .process_action(&crate::utils::AgentAction::ReadFile(path.clone()));
-                            if let Some(eid) = feed_manager.get_event_id() {
-                                let _ = room_clone
-                                    .edit_markdown(eid, &feed_manager.get_feed_content())
-                                    .await;
-                            }
-
-                            let target_path = if let Some(wd) = &working_dir {
-                                format!("{}/{}", wd, path)
-                            } else {
-                                path.clone()
-                            };
-
-                            match fs::read_to_string(&target_path) {
-                                Ok(content) => {
-                                    feed_manager.update_with_output("Read.", false);
-                                    if let Some(eid) = feed_manager.get_event_id() {
-                                        let _ = room_clone
-                                            .edit_markdown(eid, &feed_manager.get_feed_content())
-                                            .await;
-                                    }
-                                    conversation_history.push_str(&format!(
-                                        "\n\nSystem: Content of {}:\n```\n{}\n```",
-                                        path, content
-                                    ));
-                                }
-                                Err(e) => {
-                                    feed_manager
-                                        .update_with_output(&format!("Failed: {}", e), true);
-                                    if let Some(eid) = feed_manager.get_event_id() {
-                                        let _ = room_clone
-                                            .edit_markdown(eid, &feed_manager.get_feed_content())
-                                            .await;
-                                    }
-                                    conversation_history.push_str(&format!(
-                                        "\n\nSystem: Failed to read {}: {}",
-                                        path, e
-                                    ));
-                                }
-                            }
-                        }
-                        crate::utils::AgentAction::ListDir(path) => {
-                            feed_manager
-                                .process_action(&crate::utils::AgentAction::ListDir(path.clone()));
-                            if let Some(eid) = feed_manager.get_event_id() {
-                                let _ = room_clone
-                                    .edit_markdown(eid, &feed_manager.get_feed_content())
-                                    .await;
-                            }
-
-                            let target_path = if path.is_empty() || path == "." {
-                                working_dir.clone().unwrap_or(".".to_string())
-                            } else {
-                                if let Some(wd) = &working_dir {
-                                    format!("{}/{}", wd, path)
-                                } else {
-                                    path.clone()
-                                }
-                            };
-
-                            match fs::read_dir(&target_path) {
-                                Ok(entries) => {
-                                    let mut listing = String::new();
-                                    for entry in entries.flatten() {
-                                        if let Ok(name) = entry.file_name().into_string() {
-                                            listing.push_str(&format!("{}\n", name));
-                                        }
-                                    }
-                                    feed_manager.update_with_output("Listed.", false);
-                                    if let Some(eid) = feed_manager.get_event_id() {
-                                        let _ = room_clone
-                                            .edit_markdown(eid, &feed_manager.get_feed_content())
-                                            .await;
-                                    }
-                                    conversation_history.push_str(&format!(
-                                        "\n\nSystem: Directory listing of {}:\n{}",
-                                        path, listing
-                                    ));
-                                }
-                                Err(e) => {
-                                    feed_manager
-                                        .update_with_output(&format!("Failed: {}", e), true);
-                                    if let Some(eid) = feed_manager.get_event_id() {
-                                        let _ = room_clone
-                                            .edit_markdown(eid, &feed_manager.get_feed_content())
-                                            .await;
-                                    }
-                                    conversation_history.push_str(&format!(
-                                        "\n\nSystem: Failed to list {}: {}",
-                                        path, e
-                                    ));
-                                }
-                            }
-                        }
-                        crate::utils::AgentAction::ChangeDir(path) => {
-                            feed_manager.process_action(&crate::utils::AgentAction::ChangeDir(
-                                path.clone(),
-                            ));
-
-                            let new_path = if path.starts_with('/') {
-                                path.clone()
-                            } else {
-                                if let Some(wd) = &working_dir {
-                                    let joined = format!("{}/{}", wd, path);
-                                    match fs::canonicalize(&joined) {
-                                        Ok(p) => p.to_string_lossy().to_string(),
-                                        Err(_) => joined,
-                                    }
-                                } else {
-                                    path.clone()
-                                }
-                            };
-
-                            if fs::metadata(&new_path).is_ok() {
-                                working_dir = Some(new_path.clone());
-                                {
-                                    let mut bot_state = state.lock().await;
-                                    let room_state =
-                                        bot_state.get_room_state(room.room_id().as_str());
-                                    room_state.current_project_path = Some(new_path.clone());
-                                    bot_state.save();
-                                }
-                                feed_manager
-                                    .update_with_output(&format!("Changed to {}", new_path), false);
-                                if let Some(eid) = feed_manager.get_event_id() {
-                                    let _ = room_clone
-                                        .edit_markdown(eid, &feed_manager.get_feed_content())
-                                        .await;
-                                }
-                                conversation_history.push_str(&format!(
-                                    "\n\nSystem: Changed directory to {}",
-                                    new_path
-                                ));
-                            } else {
-                                feed_manager.update_with_output("Failed (invalid path)", true);
-                                if let Some(eid) = feed_manager.get_event_id() {
-                                    let _ = room_clone
-                                        .edit_markdown(eid, &feed_manager.get_feed_content())
-                                        .await;
-                                }
-                                conversation_history.push_str(&format!("\n\nSystem: Failed to change directory to {}: Path does not exist.", new_path));
                             }
                         }
                     }

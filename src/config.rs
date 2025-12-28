@@ -1,8 +1,6 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 
-
-
 /// Main application configuration structure.
 /// Matches the layout of `data/config.yaml`.
 #[derive(Debug, Deserialize, Clone)]
@@ -28,6 +26,38 @@ pub struct CommandsConfig {
     pub allowed: Vec<String>,
     #[serde(default)]
     pub blocked: Vec<String>,
+    #[serde(default)]
+    pub timeouts: TimeoutConfig,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct TimeoutConfig {
+    #[serde(default = "default_short_timeout")]
+    pub short: u64,
+    #[serde(default = "default_medium_timeout")]
+    pub medium: u64,
+    #[serde(default = "default_long_timeout")]
+    pub long: u64,
+}
+
+impl Default for TimeoutConfig {
+    fn default() -> Self {
+        Self {
+            short: default_short_timeout(),
+            medium: default_medium_timeout(),
+            long: default_long_timeout(),
+        }
+    }
+}
+
+fn default_short_timeout() -> u64 {
+    30
+}
+fn default_medium_timeout() -> u64 {
+    120
+}
+fn default_long_timeout() -> u64 {
+    600
 }
 
 fn default_command_mode() -> String {

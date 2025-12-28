@@ -108,6 +108,109 @@ impl Sandbox {
         final_result
     }
 
+    /// Enhanced check for file operations - validates both command AND paths
+    /// This extends check_command to also validate file paths stay within sandbox
+    pub fn check_file_operation(
+        &self,
+        command_line: &str,
+        config: &CommandsConfig,
+    ) -> PermissionResult {
+        // First check command permissions using existing logic
+        let cmd_permission = self.check_command(command_line, config);
+
+        if matches!(cmd_permission, PermissionResult::Blocked(_)) {
+            return cmd_permission;
+        }
+
+        // Additional path validation for file operations
+        if let Some(paths) = self.extract_file_paths(command_line) {
+            for path in paths {
+                if !self.is_path_safe(&path) {
+                    return PermissionResult::Blocked(format!(
+                        "Path '{}' escapes sandbox boundary",
+                        path
+                    ));
+                }
+            }
+        }
+
+        cmd_permission
+    }
+
+    /// Extract file paths from shell commands for validation
+    fn extract_file_paths(&self, command: &str) -> Option<Vec<String>> {
+        let mut paths = Vec::new();
+        let parts: Vec<&str> = command.split_whitespace().collect();
+
+        // Common file operation patterns
+        for (i, part) in parts.iter().enumerate() {
+            match *part {
+                "cat" | "head" | "tail" => {
+                    if i + 1 < parts.len() {
+                        paths.push(parts[i + 1].to_string());
+                    }
+                }
+                "ls" => {
+                    if i + 1 < parts.len() && !parts[i + 1].starts_with('-') {
+                        paths.push(parts[i + 1].to_string());
+                    }
+                }
+                ">" | ">>" | "<" => {
+                    if i + 1 < parts.len() {
+                        paths.push(parts[i + 1].to_string());
+                    }
+                }
+                "cd" => {
+                    if i + 1 < parts.len() {
+                        paths.push(parts[i + 1].to_string());
+                    }
+                }
+                "rm" | "mv" | "cp" => {
+                    // Validate all arguments after these commands (skip flags)
+                    for arg in parts.iter().skip(i + 1) {
+                        if !arg.starts_with('-') {
+                            paths.push(arg.to_string());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if paths.is_empty() { None } else { Some(paths) }
+    }
+
+    /// Check if path stays within sandbox boundaries
+    fn is_path_safe(&self, path: &str) -> bool {
+        use std::path::Path;
+
+        // Skip validation for flags and options
+        if path.starts_with('-') {
+            return true;
+        }
+
+        let target = if path.starts_with('/') {
+            self.root_dir.join(path.trim_start_matches('/'))
+        } else {
+            self.root_dir.join(path)
+        };
+
+        // Try to canonicalize to resolve .. and symlinks
+        match std::fs::canonicalize(&target) {
+            Ok(canon) => canon.starts_with(&self.root_dir),
+            Err(_) => {
+                // Path doesn't exist yet - check parent directory
+                if let Some(parent) = target.parent() {
+                    std::fs::canonicalize(parent)
+                        .map(|p| p.starts_with(&self.root_dir))
+                        .unwrap_or(false)
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
     fn check_single_binary(&self, binary: &str, config: &CommandsConfig) -> PermissionResult {
         // 1. Check Blocked
         if config.blocked.iter().any(|b| b == binary) {

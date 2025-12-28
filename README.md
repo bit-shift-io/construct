@@ -12,6 +12,7 @@
 - **📂 File Management**: Inspect project files directly from the chat.
 - **⏱️ Command Timeouts**: Automatic timeouts prevent hanging commands (30s/120s/600s based on category).
 - **📋 Three-Stage Feed System**: Progressive progress tracking reduces chat spam from 50+ messages to 1 updating feed.
+- **📁 Project-Based State Storage**: All project state (feed, history, tasks) stored as markdown files in project directories.
 - **⚡ Extensible**: Easily add new agent backends or custom shell commands via configuration.
 
 ## 🚀 Getting Started
@@ -137,6 +138,80 @@ agents:
 - **Groq**: Use protocol `"groq"`
 - **xAI**: Use protocol `"xai"`
 - **DeepAI**: Use protocol `"deepai"`
+
+## 📁 Project-Based State Storage
+
+Construct stores all project-specific state directly in project directories as markdown files, eliminating the need for complex cleanup systems and providing natural state isolation.
+
+### State Files
+
+Each project directory contains:
+
+```
+project/
+├── feed.md           # Real-time execution feed (3 modes: Active/Squashed/Final)
+├── state.md          # Command history & execution context
+├── roadmap.md        # Project planning and task definitions
+├── tasks.md          # Task progress tracking (maintained by agent)
+└── walkthrough.md    # Change documentation (maintained by agent)
+```
+
+### Key Benefits
+
+- **Natural Isolation**: Each project's state is completely independent
+- **Portable**: State travels with the project directory
+- **Git-Friendly**: All state in diff-able markdown files
+- **Minimal Room State**: Only ~1KB vs old 50KB+ approach
+- **Multi-Room Support**: Multiple rooms can share the same project
+- **No Cleanup Needed**: Switching projects naturally isolates state
+
+### Feed Modes
+
+The `feed.md` file evolves through three modes:
+
+1. **Active Mode** (During execution)
+   - Verbose real-time updates with command outputs
+   - Status indicators (⏳ running, ✅ success, ❌ failed)
+   - Auto-saves after each action
+
+2. **Squashed Mode** (When task completes)
+   - Compresses to concise one-liners per completed task
+   - Clean, scannable format
+
+3. **Final Mode** (When all tasks complete)
+   - Simple bullet list of all completed work
+   - Professional summary
+
+### State Lifecycle
+
+**Project Creation:**
+```bash
+.new my-project
+# Creates: roadmap.md, state.md
+```
+
+**Project Switching:**
+```bash
+.set project other-project
+# Automatically loads other-project/feed.md and state.md
+# No cleanup needed - natural isolation
+```
+
+**Multi-Room Collaboration:**
+```bash
+# Room 1
+.set project /shared/project
+
+# Room 2 (different room, same project)
+.set project /shared/project
+# Both rooms see same feed.md, state.md, etc.
+```
+
+### Implementation Details
+
+- **ProjectStateManager** (`src/state/project.rs`): Manages `state.md` with command history
+- **FeedManager** (`src/features/feed.rs`): Manages `feed.md` with three-mode evolution
+- **Room State**: Minimal (~1KB) - only stores navigation pointers, not execution history
 
 ## 📚 Documentation Strategy
 

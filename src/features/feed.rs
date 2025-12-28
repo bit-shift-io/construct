@@ -149,7 +149,10 @@ impl FeedManager {
 
     /// Mark the feed as paused (waiting for user input)
     pub fn pause(&mut self) {
-        self.add_entry("WAITING".to_string(), "Waiting for user input...".to_string());
+        self.add_entry(
+            "WAITING".to_string(),
+            "Waiting for user input...".to_string(),
+        );
     }
 
     /// Transition to squashed mode (when a task completes)
@@ -273,24 +276,13 @@ impl FeedManager {
     /// Update feed based on agent action
     pub fn process_action(&mut self, action: &AgentAction) {
         match action {
-            AgentAction::WriteFile(filename, _) => {
-                self.add_entry("WRITE_FILE".to_string(), filename.clone());
-            }
-            AgentAction::ChangeDir(path) => {
-                self.add_entry("CHANGE_DIR".to_string(), path.clone());
-            }
-            AgentAction::ReadFile(path) => {
-                self.add_entry("READ_FILE".to_string(), path.clone());
-            }
-            AgentAction::ListDir(path) => {
-                self.add_entry("LIST_DIR".to_string(), path.clone());
-            }
             AgentAction::ShellCommand(cmd) => {
-                self.add_entry("SHELL".to_string(), cmd.clone());
+                self.add_entry("COMMAND".to_string(), cmd.clone());
             }
             AgentAction::Done => {
                 // Task completed, transition to squashed mode
                 self.squash();
+                self.add_entry("STATUS".to_string(), "Task Complete".to_string());
             }
         }
     }
@@ -324,5 +316,3 @@ impl FeedManager {
         }
     }
 }
-
-
