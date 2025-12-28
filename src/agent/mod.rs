@@ -17,7 +17,7 @@ pub struct AgentContext {
     pub abort_signal: Option<tokio::sync::watch::Receiver<bool>>,
     /// Optional project state manager for logging status messages
     #[allow(dead_code)]
-    pub project_state_manager: Option<std::sync::Arc<crate::project_state::ProjectStateManager>>,
+    pub project_state_manager: Option<std::sync::Arc<crate::state::project::ProjectStateManager>>,
 }
 
 impl std::fmt::Debug for AgentContext {

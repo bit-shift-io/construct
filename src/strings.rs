@@ -1,4 +1,3 @@
-
 #[derive(Debug)]
 pub struct HelpStrings {
     pub main: &'static str,
@@ -11,7 +10,6 @@ pub struct WizardStrings {
     pub stack: &'static str,
     pub task_description: &'static str,
     pub cancelled: &'static str,
-
 }
 
 #[derive(Debug)]
@@ -34,7 +32,6 @@ pub struct PromptStrings {
 
 #[derive(Debug)]
 pub struct MessageStrings {
-
     pub status_header: &'static str,
     pub model_set: &'static str,
     pub model_reset: &'static str,
@@ -109,7 +106,6 @@ pub struct MessageStrings {
     pub plan_generation_failed: &'static str,
     pub no_active_task_modify: &'static str,
     pub current_changes_header: &'static str,
-
 }
 
 #[derive(Debug)]
@@ -179,7 +175,6 @@ pub static STRINGS: Strings = Strings {
         stack: "**🛠️ Tech Stack**\n\n1. Rust\n2. Python\n3. TypeScript\n4. Go\n\nReply with number or type custom.",
         task_description: "**📋 New Task Wizard**\n\nEnter requirements as separate messages (each will be a bullet point).\n\nType `.ok` when finished.",
         cancelled: "❌ Wizard cancelled.",
-
     },
     prompts: PromptStrings {
         system: concat!(
@@ -297,7 +292,6 @@ pub static STRINGS: Strings = Strings {
         ),
     },
     messages: MessageStrings {
-
         status_header: "**📊 System Status**\n\n",
         model_set: "✅ **Model set to**: `{}`",
         model_reset: "✅ **Model reset to default**.",
@@ -372,7 +366,6 @@ pub static STRINGS: Strings = Strings {
         plan_generation_failed: "⚠️ **Failed to generate plan**:\n{}",
         no_active_task_modify: "⚠️ No active task to modify. Use `.task` first.",
         current_changes_header: "🔍 **Current Changes**:\n```diff\n{}\n```",
-
     },
     logs: LogStrings {
         config_loaded: "Loaded configuration for user: {}",

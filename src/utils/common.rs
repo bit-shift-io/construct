@@ -106,8 +106,10 @@ pub fn parse_actions(response: &str) -> Vec<AgentAction> {
                 } else {
                     if content == "DONE" {
                         actions.push(AgentAction::Done);
-                    } else if content.contains("**System Command Output:**") || content.contains("System Command Output:") {
-                         // Ignore hallucinated system headers
+                    } else if content.contains("**System Command Output:**")
+                        || content.contains("System Command Output:")
+                    {
+                        // Ignore hallucinated system headers
                     } else {
                         actions.push(AgentAction::ShellCommand(content));
                     }
@@ -142,7 +144,7 @@ pub async fn run_command(command: &str, folder: Option<&str>) -> Result<String, 
         .output()
         .await
         .map_err(|e| {
-            crate::prompts::STRINGS
+            crate::strings::STRINGS
                 .messages
                 .command_run_failed
                 .replace("{}", &e.to_string())
@@ -203,7 +205,7 @@ pub async fn run_shell_command_with_timeout(
     let output = match result {
         Ok(Ok(output)) => output,
         Ok(Err(e)) => {
-            return Err(crate::prompts::STRINGS
+            return Err(crate::strings::STRINGS
                 .messages
                 .shell_command_failed
                 .replace("{}", &e.to_string()));

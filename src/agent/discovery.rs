@@ -40,7 +40,7 @@ pub async fn list_gemini_models(config: &AppConfig) -> Result<Vec<String>, Strin
         k.clone()
     } else if let Some(env_var) = &agent_config.api_key_env {
         std::env::var(env_var).map_err(|_| {
-            crate::prompts::STRINGS
+            crate::strings::STRINGS
                 .messages
                 .missing_env_var
                 .replace("{}", env_var)
@@ -64,21 +64,21 @@ pub async fn list_gemini_models_web(api_key: &str) -> Result<Vec<String>, String
     );
 
     let resp = client.get(&url).send().await.map_err(|e| {
-        crate::prompts::STRINGS
+        crate::strings::STRINGS
             .messages
             .gemini_fetch_failed
             .replace("{}", &e.to_string())
     })?;
 
     if !resp.status().is_success() {
-        return Err(crate::prompts::STRINGS
+        return Err(crate::strings::STRINGS
             .messages
             .gemini_api_error
             .replace("{}", &resp.status().to_string()));
     }
 
     let body: GeminiListResponse = resp.json().await.map_err(|e| {
-        crate::prompts::STRINGS
+        crate::strings::STRINGS
             .messages
             .gemini_parse_error
             .replace("{}", &e.to_string())
@@ -107,7 +107,7 @@ pub async fn list_anthropic_models(config: &AppConfig) -> Result<Vec<String>, St
         k.clone()
     } else if let Some(env_var) = &agent_config.api_key_env {
         std::env::var(env_var).map_err(|_| {
-            crate::prompts::STRINGS
+            crate::strings::STRINGS
                 .messages
                 .missing_env_var
                 .replace("{}", env_var)
@@ -128,21 +128,21 @@ pub async fn list_anthropic_models(config: &AppConfig) -> Result<Vec<String>, St
         .send()
         .await
         .map_err(|e| {
-            crate::prompts::STRINGS
+            crate::strings::STRINGS
                 .messages
                 .anthropic_fetch_failed
                 .replace("{}", &e.to_string())
         })?;
 
     if !resp.status().is_success() {
-        return Err(crate::prompts::STRINGS
+        return Err(crate::strings::STRINGS
             .messages
             .anthropic_api_error
             .replace("{}", &resp.status().to_string()));
     }
 
     let body: AnthropicListResponse = resp.json().await.map_err(|e| {
-        crate::prompts::STRINGS
+        crate::strings::STRINGS
             .messages
             .anthropic_parse_error
             .replace("{}", &e.to_string())
@@ -174,7 +174,7 @@ pub async fn list_groq_models(config: &AppConfig) -> Result<Vec<String>, String>
         k.clone()
     } else if let Some(env_var) = &agent_config.api_key_env {
         std::env::var(env_var).map_err(|_| {
-            crate::prompts::STRINGS
+            crate::strings::STRINGS
                 .messages
                 .missing_env_var
                 .replace("{}", env_var)
@@ -218,7 +218,7 @@ pub async fn list_zai_models(config: &AppConfig) -> Result<Vec<String>, String> 
         k.clone()
     } else if let Some(env_var) = &agent_config.api_key_env {
         std::env::var(env_var).map_err(|_| {
-            crate::prompts::STRINGS
+            crate::strings::STRINGS
                 .messages
                 .missing_env_var
                 .replace("{}", env_var)
@@ -239,21 +239,21 @@ pub async fn list_zai_models(config: &AppConfig) -> Result<Vec<String>, String> 
         .send()
         .await
         .map_err(|e| {
-            crate::prompts::STRINGS
+            crate::strings::STRINGS
                 .messages
                 .anthropic_fetch_failed
                 .replace("{}", &e.to_string())
         })?;
 
     if !resp.status().is_success() {
-        return Err(crate::prompts::STRINGS
+        return Err(crate::strings::STRINGS
             .messages
             .anthropic_api_error
             .replace("{}", &resp.status().to_string()));
     }
 
     let body: AnthropicListResponse = resp.json().await.map_err(|e| {
-        crate::prompts::STRINGS
+        crate::strings::STRINGS
             .messages
             .anthropic_parse_error
             .replace("{}", &e.to_string())

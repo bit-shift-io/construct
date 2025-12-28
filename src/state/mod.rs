@@ -1,9 +1,11 @@
+pub mod project;
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
 use tokio::sync::watch;
-use crate::feed::FeedManager;
+use crate::features::feed::FeedManager;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum WizardStep {

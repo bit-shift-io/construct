@@ -1,6 +1,6 @@
-use crate::util::run_command;
-use crate::state::BotState;
 use crate::services::ChatService;
+use crate::state::BotState;
+use crate::utils::run_command;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -14,7 +14,7 @@ pub async fn handle_changes(state: Arc<Mutex<BotState>>, room: &impl ChatService
     };
     let _ = room
         .send_markdown(
-            &crate::prompts::STRINGS
+            &crate::strings::STRINGS
                 .messages
                 .current_changes_header
                 .replace("{}", &response),
@@ -28,7 +28,7 @@ pub async fn handle_commit(state: Arc<Mutex<BotState>>, argument: &str, room: &i
     let room_state = bot_state.get_room_state(&room.room_id());
     if argument.is_empty() {
         let _ = room
-            .send_markdown(&crate::prompts::STRINGS.messages.please_commit_msg)
+            .send_markdown(&crate::strings::STRINGS.messages.please_commit_msg)
             .await;
     } else {
         // Note: Git command construction is internal info, kept as format!
@@ -39,7 +39,7 @@ pub async fn handle_commit(state: Arc<Mutex<BotState>>, argument: &str, room: &i
         };
         let _ = room
             .send_markdown(
-                &crate::prompts::STRINGS
+                &crate::strings::STRINGS
                     .messages
                     .committed_msg
                     .replace("{}", &resp),
@@ -54,6 +54,6 @@ pub async fn handle_discard(state: Arc<Mutex<BotState>>, room: &impl ChatService
     let room_state = bot_state.get_room_state(&room.room_id());
     let _ = run_command("git checkout .", room_state.current_project_path.as_deref()).await;
     let _ = room
-        .send_markdown(&crate::prompts::STRINGS.messages.changes_discarded)
+        .send_markdown(&crate::strings::STRINGS.messages.changes_discarded)
         .await;
 }

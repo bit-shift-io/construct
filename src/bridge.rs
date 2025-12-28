@@ -47,7 +47,7 @@ impl BridgeManager {
             };
 
             if wizard_active {
-                crate::wizard::handle_input(&self.config, self.state.clone(), room, msg_body).await;
+                crate::commands::wizard::handle_input(&self.config, self.state.clone(), room, msg_body).await;
                 return;
             }
         }

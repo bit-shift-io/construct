@@ -11,3 +11,4 @@ pub use core::*;
 pub use git::*;
 pub use project::*;
 pub use admin::*;
+pub mod wizard;

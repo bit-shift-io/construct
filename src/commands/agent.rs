@@ -1,11 +1,11 @@
-use crate::config::AppConfig;
-use crate::state::BotState;
-use crate::services::ChatService;
 use crate::agent::{AgentContext, discovery};
 use crate::commands::core::execute_with_fallback;
+use crate::config::AppConfig;
+use crate::services::ChatService;
+use crate::services::message_helper::MessageHelper;
+use crate::state::BotState;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use crate::message_helper::MessageHelper;
 
 // Helper to resolve the active agent name with smart fallback.
 pub fn resolve_agent_name(active_agent: Option<&str>, config: &AppConfig) -> String {
@@ -109,7 +109,7 @@ pub async fn handle_agent(
             bot_state.save();
             let _ = room
                 .send_markdown(
-                    &crate::prompts::STRINGS
+                    &crate::strings::STRINGS
                         .messages
                         .model_set
                         .replace("{}", &agent_name),
@@ -304,7 +304,7 @@ pub async fn handle_model(state: Arc<Mutex<BotState>>, argument: &str, room: &im
         bot_state.save();
         let _ = room
             .send_markdown(
-                &crate::prompts::STRINGS
+                &crate::strings::STRINGS
                     .messages
                     .model_set
                     .replace("{}", &model),
@@ -314,11 +314,11 @@ pub async fn handle_model(state: Arc<Mutex<BotState>>, argument: &str, room: &im
         room_state.active_model = None;
         bot_state.save();
         let _ = room
-            .send_markdown(&crate::prompts::STRINGS.messages.model_reset)
+            .send_markdown(&crate::strings::STRINGS.messages.model_reset)
             .await;
     } else {
         let _ = room
-            .send_markdown(&crate::prompts::STRINGS.messages.invalid_model)
+            .send_markdown(&crate::strings::STRINGS.messages.invalid_model)
             .await;
     }
 }
@@ -372,7 +372,7 @@ pub async fn handle_ask<S: ChatService + Clone + Send + 'static>(
             })),
             abort_signal: None,
             project_state_manager: working_dir.as_ref().map(|p| {
-                std::sync::Arc::new(crate::project_state::ProjectStateManager::new(p.clone()))
+                std::sync::Arc::new(crate::state::project::ProjectStateManager::new(p.clone()))
             }),
         };
 

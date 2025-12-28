@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use crate::config::CommandsConfig;
+use std::path::PathBuf;
 
 #[derive(Debug)]
 pub enum PermissionResult {
@@ -36,7 +36,7 @@ impl Sandbox {
         };
 
         let target = base.join(target_path);
-        
+
         // Canonicalize to resolve .. and symlinks
         match std::fs::canonicalize(&target) {
             Ok(canon) => {
@@ -59,7 +59,7 @@ impl Sandbox {
         // 1. Detect potentially dangerous sub-shell execution that we can't easily parse
         if command_line.contains("$(") || command_line.contains('`') {
             return PermissionResult::Ask(format!(
-                "Complex subshell execution detected in: {}", 
+                "Complex subshell execution detected in: {}",
                 command_line
             ));
         }
@@ -67,51 +67,56 @@ impl Sandbox {
         // 2. Split into individual commands respecting quotes
         let commands = self.split_shell_commands(command_line);
         if commands.is_empty() {
-             return PermissionResult::Allowed;
+            return PermissionResult::Allowed;
         }
 
         let mut final_result = PermissionResult::Allowed;
 
         // 3. Check EACH command in the chain
         for cmd in commands {
-             let parts: Vec<&str> = cmd.split_whitespace().collect();
-             if parts.is_empty() { 
-                 continue; 
-             }
-             
-             // Handle sudo prefix - check the actual command
-             let binary = if parts[0] == "sudo" && parts.len() > 1 {
-                 parts[1]
-             } else {
-                 parts[0]
-             };
+            let parts: Vec<&str> = cmd.split_whitespace().collect();
+            if parts.is_empty() {
+                continue;
+            }
 
-             // Check status for this specific binary
-             let result = self.check_single_binary(binary, config);
-             
-             match result {
-                 PermissionResult::Blocked(msg) => {
-                     // If ANY part is blocked, the whole chain is blocked immediately
-                     return PermissionResult::Blocked(msg);
-                 },
-                 PermissionResult::Ask(msg) => {
-                     // If ANY part needs asking, we upgrade the final result to Ask
-                     // (unless we later hit a Blocked, which we check first)
-                     final_result = PermissionResult::Ask(msg);
-                 },
-                 PermissionResult::Allowed => {
-                     // If Allowed, continue checking others
-                 }
-             }
+            // Handle sudo prefix - check the actual command
+            let binary = if parts[0] == "sudo" && parts.len() > 1 {
+                parts[1]
+            } else {
+                parts[0]
+            };
+
+            // Check status for this specific binary
+            let result = self.check_single_binary(binary, config);
+
+            match result {
+                PermissionResult::Blocked(msg) => {
+                    // If ANY part is blocked, the whole chain is blocked immediately
+                    return PermissionResult::Blocked(msg);
+                }
+                PermissionResult::Ask(msg) => {
+                    // If ANY part needs asking, we upgrade the final result to Ask
+                    // (unless we later hit a Blocked, which we check first)
+                    final_result = PermissionResult::Ask(msg);
+                }
+                PermissionResult::Allowed => {
+                    // If Allowed, continue checking others
+                }
+            }
         }
-        
+
         final_result
     }
 
     fn check_single_binary(&self, binary: &str, config: &CommandsConfig) -> PermissionResult {
         // 1. Check Blocked
         if config.blocked.iter().any(|b| b == binary) {
-            return PermissionResult::Blocked(crate::prompts::STRINGS.messages.command_blocked.replace("{}", binary));
+            return PermissionResult::Blocked(
+                crate::strings::STRINGS
+                    .messages
+                    .command_blocked
+                    .replace("{}", binary),
+            );
         }
 
         // 2. Check Allowed
@@ -121,14 +126,29 @@ impl Sandbox {
 
         // 3. Check Ask
         if config.ask.iter().any(|a| a == binary) {
-            return PermissionResult::Ask(crate::prompts::STRINGS.messages.command_ask.replace("{}", binary));
+            return PermissionResult::Ask(
+                crate::strings::STRINGS
+                    .messages
+                    .command_ask
+                    .replace("{}", binary),
+            );
         }
 
         // 4. Default Mode
         match config.default.as_str() {
             "allow" => PermissionResult::Allowed,
-            "block" => PermissionResult::Blocked(crate::prompts::STRINGS.messages.command_not_allowed.replace("{}", binary)),
-            _ => PermissionResult::Ask(crate::prompts::STRINGS.messages.command_unknown.replace("{}", binary)),
+            "block" => PermissionResult::Blocked(
+                crate::strings::STRINGS
+                    .messages
+                    .command_not_allowed
+                    .replace("{}", binary),
+            ),
+            _ => PermissionResult::Ask(
+                crate::strings::STRINGS
+                    .messages
+                    .command_unknown
+                    .replace("{}", binary),
+            ),
         }
     }
 
@@ -149,19 +169,29 @@ impl Sandbox {
                         // Separators: ; | &
                         // We treat '&&', '||', '|', '&', ';' as split points
                         if c == ';' {
-                            if !current.trim().is_empty() { parts.push(current.trim().to_string()); }
+                            if !current.trim().is_empty() {
+                                parts.push(current.trim().to_string());
+                            }
                             current.clear();
                             continue;
                         }
                         if c == '|' {
-                            if chars.peek() == Some(&'|') { chars.next(); } // consume ||
-                            if !current.trim().is_empty() { parts.push(current.trim().to_string()); }
+                            if chars.peek() == Some(&'|') {
+                                chars.next();
+                            } // consume ||
+                            if !current.trim().is_empty() {
+                                parts.push(current.trim().to_string());
+                            }
                             current.clear();
                             continue;
                         }
                         if c == '&' {
-                            if chars.peek() == Some(&'&') { chars.next(); } // consume &&
-                            if !current.trim().is_empty() { parts.push(current.trim().to_string()); }
+                            if chars.peek() == Some(&'&') {
+                                chars.next();
+                            } // consume &&
+                            if !current.trim().is_empty() {
+                                parts.push(current.trim().to_string());
+                            }
                             current.clear();
                             continue;
                         }
@@ -177,11 +207,11 @@ impl Sandbox {
     }
 
     /// Rewrites the output to hide the real root path.
-    #[allow(dead_code)] 
+    #[allow(dead_code)]
     pub fn virtualize_output(&self, output: &str) -> String {
         let root_str = self.root_dir.to_string_lossy();
         if output.trim() == root_str {
-             return output.replace(&*root_str, "/");
+            return output.replace(&*root_str, "/");
         }
         output.replace(&*root_str, "")
     }

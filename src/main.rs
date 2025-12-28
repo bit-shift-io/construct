@@ -4,15 +4,13 @@ mod agent;
 mod bridge;
 mod commands;
 mod config;
-mod feed;
-mod message_helper;
-mod project_state;
-mod sandbox;
+
+mod features;
 mod services;
 mod state;
-mod util;
-mod wizard;
-mod prompts;
+mod utils;
+
+mod strings;
 
 use anyhow::{Context, Result};
 use matrix_sdk::{
@@ -60,7 +58,7 @@ async fn main() -> Result<()> {
 
     println!(
         "{}",
-        crate::prompts::STRINGS
+        crate::strings::STRINGS
             .logs
             .config_loaded
             .replace("{}", &config.services.matrix.username)
@@ -82,13 +80,13 @@ async fn main() -> Result<()> {
         .send()
         .await?;
 
-    println!("{}", crate::prompts::STRINGS.logs.login_success);
+    println!("{}", crate::strings::STRINGS.logs.login_success);
 
     // 5. Update Display Name if configured
     if let Some(display_name) = &config.services.matrix.display_name {
         println!(
             "{}",
-            crate::prompts::STRINGS
+            crate::strings::STRINGS
                 .logs
                 .setting_display_name
                 .replace("{}", display_name)
@@ -96,7 +94,7 @@ async fn main() -> Result<()> {
         if let Err(e) = client.account().set_display_name(Some(display_name)).await {
             eprintln!(
                 "{}",
-                crate::prompts::STRINGS
+                crate::strings::STRINGS
                     .logs
                     .set_display_name_fail
                     .replace("{}", &e.to_string())
@@ -148,11 +146,11 @@ async fn main() -> Result<()> {
     // 6. Start Sync Loop
     let sync_client = client.clone();
     let sync_handle = tokio::spawn(async move {
-        println!("{}", crate::prompts::STRINGS.logs.sync_loop_start);
+        println!("{}", crate::strings::STRINGS.logs.sync_loop_start);
         if let Err(e) = sync_client.sync(SyncSettings::default()).await {
             eprintln!(
                 "{}",
-                crate::prompts::STRINGS
+                crate::strings::STRINGS
                     .logs
                     .sync_loop_fail
                     .replace("{}", &e.to_string())
@@ -165,10 +163,10 @@ async fn main() -> Result<()> {
 
     // 8. Graceful Shutdown
     match tokio::signal::ctrl_c().await {
-        Ok(()) => println!("{}", crate::prompts::STRINGS.logs.shutdown),
+        Ok(()) => println!("{}", crate::strings::STRINGS.logs.shutdown),
         Err(err) => eprintln!(
             "{}",
-            crate::prompts::STRINGS
+            crate::strings::STRINGS
                 .logs
                 .shutdown_fail
                 .replace("{}", &err.to_string())
@@ -187,7 +185,7 @@ async fn setup_bridges(client: &Client, config: &AppConfig, state: Arc<Mutex<Bot
                 if let Some(room_id_str) = &entry.channel {
                     println!(
                         "{}",
-                        crate::prompts::STRINGS
+                        crate::strings::STRINGS
                             .logs
                             .bridge_joining
                             .replace("{}", bridge_name)
@@ -198,7 +196,7 @@ async fn setup_bridges(client: &Client, config: &AppConfig, state: Arc<Mutex<Bot
                         if let Err(e) = client.join_room_by_id(&room_id).await {
                             eprintln!(
                                 "{}",
-                                crate::prompts::STRINGS
+                                crate::strings::STRINGS
                                     .logs
                                     .bridge_join_fail
                                     .replace("{}", room_id_str)
@@ -207,7 +205,7 @@ async fn setup_bridges(client: &Client, config: &AppConfig, state: Arc<Mutex<Bot
                         } else if let Some(room) = client.get_room(&room_id) {
                             println!(
                                 "{}",
-                                crate::prompts::STRINGS
+                                crate::strings::STRINGS
                                     .logs
                                     .bridge_join_success
                                     .replace("{}", room_id_str)
@@ -229,7 +227,7 @@ async fn handle_invites(event: StrippedRoomMemberEvent, room: Room) {
     if event.content.membership == MembershipState::Invite {
         println!(
             "{}",
-            crate::prompts::STRINGS
+            crate::strings::STRINGS
                 .logs
                 .invite_received
                 .replace("{}", &format!("{:?}", room.room_id()))
@@ -237,13 +235,13 @@ async fn handle_invites(event: StrippedRoomMemberEvent, room: Room) {
         if let Err(e) = room.join().await {
             eprintln!(
                 "{}",
-                crate::prompts::STRINGS
+                crate::strings::STRINGS
                     .logs
                     .join_invite_fail
                     .replace("{}", &e.to_string())
             );
         } else {
-            println!("{}", crate::prompts::STRINGS.logs.join_invite_success);
+            println!("{}", crate::strings::STRINGS.logs.join_invite_success);
         }
     }
 }

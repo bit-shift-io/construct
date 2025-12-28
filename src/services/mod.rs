@@ -21,3 +21,4 @@ pub trait ChatService: Send + Sync {
     /// Sets the typing status.
     async fn typing(&self, active: bool) -> Result<()>;
 }
+pub mod message_helper;

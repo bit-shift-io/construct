@@ -497,16 +497,16 @@ impl Agent for UnifiedAgent {
                         .form(&[("text", &context.prompt)])
                         .send()
                         .await
-                        .map_err(|e| crate::prompts::STRINGS.messages.deepai_request_failed.replace("{}", &e.to_string()))?;
+                        .map_err(|e| crate::strings::STRINGS.messages.deepai_request_failed.replace("{}", &e.to_string()))?;
 
                     if !resp.status().is_success() {
-                        return Err(crate::prompts::STRINGS.messages.deepai_api_error.replace("{}", &resp.status().to_string()));
+                        return Err(crate::strings::STRINGS.messages.deepai_api_error.replace("{}", &resp.status().to_string()));
                     }
 
                     let body: DeepAIResponse = resp
                         .json()
                         .await
-                        .map_err(|e| crate::prompts::STRINGS.messages.deepai_parse_error.replace("{}", &e.to_string()))?;
+                        .map_err(|e| crate::strings::STRINGS.messages.deepai_parse_error.replace("{}", &e.to_string()))?;
                     Ok(body.output)
                 }
                 "copilot" | "github_copilot" => {
@@ -521,7 +521,7 @@ impl Agent for UnifiedAgent {
                     // Refactor to use crate::util::run_command
                     let escaped_prompt = context.prompt.replace("\"", "\\\"");
                     let cmd = format!("{}{} \"{}\"", binary, model_flag, escaped_prompt);
-                    crate::util::run_command(&cmd, context.working_dir.as_deref()).await
+                    crate::utils::run_command(&cmd, context.working_dir.as_deref()).await
                 }
                 "openai" => {
                     let client = openai::Client::from_env();
@@ -555,7 +555,7 @@ impl Agent for UnifiedAgent {
                         .await
                         .map_err(|e| e.to_string())
                 }
-                _ => Err(crate::prompts::STRINGS.messages.unsupported_provider.replace("{}", &self.provider)),
+                _ => Err(crate::strings::STRINGS.messages.unsupported_provider.replace("{}", &self.provider)),
             }
         }.await;
 

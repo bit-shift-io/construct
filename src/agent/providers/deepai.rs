@@ -59,21 +59,21 @@ pub async fn execute(
         .send()
         .await
         .map_err(|e| {
-            crate::prompts::STRINGS
+            crate::strings::STRINGS
                 .messages
                 .deepai_request_failed
                 .replace("{}", &e.to_string())
         })?;
 
     if !resp.status().is_success() {
-        return Err(crate::prompts::STRINGS
+        return Err(crate::strings::STRINGS
             .messages
             .deepai_api_error
             .replace("{}", &resp.status().to_string()));
     }
 
     let body: DeepAIResponse = resp.json().await.map_err(|e| {
-        crate::prompts::STRINGS
+        crate::strings::STRINGS
             .messages
             .deepai_parse_error
             .replace("{}", &e.to_string())

@@ -1,7 +1,7 @@
-use crate::util::run_command;
 use crate::config::AppConfig;
-use crate::state::BotState;
 use crate::services::ChatService;
+use crate::state::BotState;
+use crate::utils::run_command;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -16,7 +16,7 @@ pub async fn handle_build(
     let cmd = "cargo build";
 
     let _ = room
-        .send_markdown(&crate::prompts::STRINGS.messages.building_msg)
+        .send_markdown(&crate::strings::STRINGS.messages.building_msg)
         .await;
     let response = match run_command(cmd, room_state.current_project_path.as_deref()).await {
         Ok(o) => o,
@@ -24,7 +24,7 @@ pub async fn handle_build(
     };
     let _ = room
         .send_markdown(
-            &crate::prompts::STRINGS
+            &crate::strings::STRINGS
                 .messages
                 .build_result
                 .replace("{}", &response),
@@ -44,7 +44,7 @@ pub async fn handle_deploy(
     let cmd = "docker compose up -d --build";
 
     let _ = room
-        .send_markdown(&crate::prompts::STRINGS.messages.deploying_msg)
+        .send_markdown(&crate::strings::STRINGS.messages.deploying_msg)
         .await;
     let response = match run_command(cmd, room_state.current_project_path.as_deref()).await {
         Ok(o) => o,
@@ -52,7 +52,7 @@ pub async fn handle_deploy(
     };
     let _ = room
         .send_markdown(
-            &crate::prompts::STRINGS
+            &crate::strings::STRINGS
                 .messages
                 .deploy_result
                 .replace("{}", &response),
@@ -71,7 +71,7 @@ pub async fn handle_check(
     let cmd = "cargo check";
 
     let _ = room
-        .send_markdown(&crate::prompts::STRINGS.messages.checking_msg)
+        .send_markdown(&crate::strings::STRINGS.messages.checking_msg)
         .await;
     let response = match run_command(cmd, room_state.current_project_path.as_deref()).await {
         Ok(o) => o,
@@ -79,7 +79,7 @@ pub async fn handle_check(
     };
     let _ = room
         .send_markdown(
-            &crate::prompts::STRINGS
+            &crate::strings::STRINGS
                 .messages
                 .check_result
                 .replace("{}", &response),
