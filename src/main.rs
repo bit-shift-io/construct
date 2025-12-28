@@ -1,16 +1,18 @@
 #![recursion_limit = "256"]
 
-mod admin;
 mod agent;
 mod bridge;
 mod commands;
 mod config;
+mod feed;
 mod message_helper;
+mod project_state;
 mod sandbox;
 mod services;
 mod state;
 mod util;
 mod wizard;
+mod prompts;
 
 use anyhow::{Context, Result};
 use matrix_sdk::{
@@ -245,4 +247,3 @@ async fn handle_invites(event: StrippedRoomMemberEvent, room: Room) {
         }
     }
 }
-mod prompts;

@@ -106,6 +106,8 @@ pub fn parse_actions(response: &str) -> Vec<AgentAction> {
                 } else {
                     if content == "DONE" {
                         actions.push(AgentAction::Done);
+                    } else if content.contains("**System Command Output:**") || content.contains("System Command Output:") {
+                         // Ignore hallucinated system headers
                     } else {
                         actions.push(AgentAction::ShellCommand(content));
                     }
@@ -158,30 +160,62 @@ pub async fn run_command(command: &str, folder: Option<&str>) -> Result<String, 
     }
 }
 
-/// Helper to run a raw shell command using `sh -c`.
+/// Helper to run a raw shell command using `sh -c` with timeout support.
 /// This allows for pipes, redirects, and other shell features.
 pub async fn run_shell_command(command: &str, folder: Option<&str>) -> Result<String, String> {
+    run_shell_command_with_timeout(command, folder, None).await
+}
+
+/// Helper to run a raw shell command using `sh -c` with configurable timeout.
+/// This allows for pipes, redirects, and other shell features.
+pub async fn run_shell_command_with_timeout(
+    command: &str,
+    folder: Option<&str>,
+    timeout: Option<std::time::Duration>,
+) -> Result<String, String> {
     use tokio::process::Command;
+    use tokio::time::timeout as tokio_timeout;
+
+    // Determine which timeout to use (default to medium)
+    let timeout_duration = timeout.unwrap_or_else(|| std::time::Duration::from_secs(120));
 
     // Log the command attempt
     log_interaction(
         "SHELL_EXEC",
         "system",
-        &format!("Running Command: {}", command),
+        &format!(
+            "Running Command: {} (timeout: {:?})",
+            command, timeout_duration
+        ),
     );
 
-    let output = Command::new("sh")
-        .arg("-c")
-        .arg(command)
-        .current_dir(folder.unwrap_or("."))
-        .output()
-        .await
-        .map_err(|e| {
-            crate::prompts::STRINGS
+    // Execute command with timeout
+    let result = tokio_timeout(
+        timeout_duration,
+        Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .current_dir(folder.unwrap_or("."))
+            .output(),
+    )
+    .await;
+
+    let output = match result {
+        Ok(Ok(output)) => output,
+        Ok(Err(e)) => {
+            return Err(crate::prompts::STRINGS
                 .messages
                 .shell_command_failed
-                .replace("{}", &e.to_string())
-        })?;
+                .replace("{}", &e.to_string()));
+        }
+        Err(_) => {
+            return Err(format!(
+                "Command timed out after {:?}. Consider breaking this into smaller steps or running in the background.",
+                timeout_duration
+            ));
+        }
+    };
+
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
@@ -221,7 +255,7 @@ pub fn log_interaction(kind: &str, provider: &str, content: &str) {
     if let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open("/data/agent.log")
+        .open("data/agent.log")
     {
         let _ = file.write_all(log_entry.as_bytes());
     }

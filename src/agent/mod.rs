@@ -15,6 +15,9 @@ pub struct AgentContext {
     pub status_callback: Option<std::sync::Arc<dyn Fn(String) + Send + Sync>>,
     #[allow(dead_code)] // May not be used by all agents yet
     pub abort_signal: Option<tokio::sync::watch::Receiver<bool>>,
+    /// Optional project state manager for logging status messages
+    #[allow(dead_code)]
+    pub project_state_manager: Option<std::sync::Arc<crate::project_state::ProjectStateManager>>,
 }
 
 impl std::fmt::Debug for AgentContext {

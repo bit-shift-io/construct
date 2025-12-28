@@ -1,6 +1,8 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 
+
+
 /// Main application configuration structure.
 /// Matches the layout of `data/config.yaml`.
 #[derive(Debug, Deserialize, Clone)]
@@ -66,13 +68,11 @@ pub struct AgentConfig {
     #[serde(default)]
     pub command: Option<String>, // Legacy CLI command
     #[serde(default)]
-    pub model: String,           // Required for Rig
+    pub model: String, // Required for Rig
     #[serde(default)]
     pub api_key: Option<String>,
     #[serde(default)]
     pub api_key_env: Option<String>, // e.g. "GEMINI_API_KEY"
-    #[serde(default)]
-    pub models: Option<Vec<String>>, // List of models to cycle through
     #[serde(default)]
     pub model_order: Option<Vec<String>>, // Regex patterns for ordering discovered models
     #[serde(default)]

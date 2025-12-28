@@ -10,6 +10,8 @@
 - **📝 Task-Driven Workflow**: Initiate tasks, generate plans, refine them with feedback, and execute them.
 - **🛠️ Integrated DevOps**: Built-in support for Git operations (`commit`, `diff`, `discard`) and custom build/deploy commands.
 - **📂 File Management**: Inspect project files directly from the chat.
+- **⏱️ Command Timeouts**: Automatic timeouts prevent hanging commands (30s/120s/600s based on category).
+- **📋 Three-Stage Feed System**: Progressive progress tracking reduces chat spam from 50+ messages to 1 updating feed.
 - **⚡ Extensible**: Easily add new agent backends or custom shell commands via configuration.
 
 ## 🚀 Getting Started
@@ -143,7 +145,29 @@ Construct separates long-term project context from short-term session artifacts 
 ### Artifacts
 - **plan.md**: Generated task plans created by the active agent
 - **walkthrough.md**: Execution summaries and implementation details
+- **feed.md**: Progressive activity feed that tracks task execution in real-time
 - **agent.log**: Interaction logs for debugging and audit trails
+
+**Feed System**
+Construct uses a sophisticated three-stage feed system to dramatically reduce chat spam while providing comprehensive visibility:
+
+1. **Active Feed** (During execution)
+   - Shows every command execution in real-time
+   - Displays command outputs (truncated to 300 chars)
+   - Updates via message edits
+   - Keeps last 15 recent activities
+
+2. **Squashed Feed** (When task completes)
+   - Compresses verbose details into concise one-liners
+   - Each completed task becomes a single timestamped entry
+   - Clean, scannable format
+
+3. **Final Feed** (When all tasks complete)
+   - Simple bullet list of all completed tasks
+   - Easy to scan and review
+   - Professional summary
+
+The feed is automatically saved as `feed.md` in your project directory for persistent record-keeping.
 
 ### Session State
 - Active project directory
@@ -222,7 +246,22 @@ commands:
     - "git"
   blocked:            # Blocked commands
     - "su"
+  
+  # Command timeouts (in seconds)
+  # Prevents commands from hanging indefinitely
+  timeouts:
+    short: 30   # Quick commands (ls, cat, grep, etc.)
+    medium: 120 # Standard commands (git, build, test, etc.)
+    long: 600   # Long-running commands (cargo build, npm install, etc.)
 ```
+
+**Command Timeout System**
+Commands are automatically categorized and time out after specified durations:
+- **Short timeout (30s)**: Quick commands like `ls`, `cat`, `grep`
+- **Medium timeout (120s)**: Standard commands like `git`, `cargo test`, `npm test`
+- **Long timeout (600s)**: Long-running commands like `cargo build`, `npm install`
+
+If a command times out, the agent will be notified and can break it into smaller steps.
 
 ## 🔧 Development
 

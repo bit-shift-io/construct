@@ -216,6 +216,14 @@ commands:
     - "passwd"
     - "chmod 777"
 
+  # Command timeouts (in seconds)
+  # Prevents commands from hanging indefinitely
+  timeouts:
+    short: 30 # Quick commands (ls, cat, grep, etc.)
+    medium: 120 # Standard commands (git, build, test, etc.)
+    long: 600 # Long-running commands (cargo build, npm install, etc.)
+
+
 # ============================================================================
 # Quick Start Guide
 # ============================================================================

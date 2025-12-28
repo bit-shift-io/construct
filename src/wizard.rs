@@ -189,13 +189,13 @@ async fn render_step<S: ChatService>(state: Arc<Mutex<BotState>>, room: &S) {
 
     let msg = match step {
         Some(WizardStep::ProjectName) => {
-            crate::prompts::STRINGS.wizard.project_name.clone()
+            crate::prompts::STRINGS.wizard.project_name.to_string()
         }
         Some(WizardStep::ProjectType) => {
-            crate::prompts::STRINGS.wizard.project_type.clone()
+            crate::prompts::STRINGS.wizard.project_type.to_string()
         }
         Some(WizardStep::Stack) => {
-             crate::prompts::STRINGS.wizard.stack.clone()
+             crate::prompts::STRINGS.wizard.stack.to_string()
         }
         Some(WizardStep::Description) => {
             if buffer_len == 0 {
@@ -207,7 +207,7 @@ async fn render_step<S: ChatService>(state: Arc<Mutex<BotState>>, room: &S) {
         }
         Some(WizardStep::TaskDescription) => {
             if buffer_len == 0 {
-                 crate::prompts::STRINGS.wizard.task_description.clone()
+                 crate::prompts::STRINGS.wizard.task_description.to_string()
             } else {
                  return;
             }

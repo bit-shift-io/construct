@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
 use tokio::sync::watch;
+use crate::feed::FeedManager;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum WizardStep {
@@ -37,7 +38,6 @@ pub struct RoomState {
     pub active_task: Option<String>,
     pub active_agent: Option<String>,
     pub active_model: Option<String>,
-    pub execution_history: Option<String>,
     #[serde(default)]
     pub stop_requested: bool,
     #[serde(default)]
@@ -63,6 +63,24 @@ pub struct RoomState {
     pub command_retry_count: u32,
     #[serde(default)]
     pub last_message_event_id: Option<String>,
+    #[serde(default)]
+    pub feed_event_id: Option<String>,
+    #[serde(default)]
+    pub feed_manager: Option<FeedManager>,
+    #[serde(skip)]
+    pub input_tx: Option<tokio::sync::mpsc::Sender<String>>,
+}
+
+impl RoomState {
+    /// Cleans up temporary state after task completion.
+    pub fn cleanup_after_task(&mut self) {
+        self.pending_command = None;
+        self.pending_agent_response = None;
+        self.last_command = None;
+        self.command_retry_count = 0;
+        self.is_task_completed = false;
+        self.feed_event_id = None;
+    }
 }
 
 /// Persistent state of the bot, mapping Room IDs to their respective room states.
@@ -71,9 +89,6 @@ pub struct RoomState {
 pub struct BotState {
     #[serde(default)]
     pub rooms: HashMap<String, RoomState>,
-    #[serde(default)]
-    #[serde(skip)] // Do not persist transient rate limits
-    pub last_provider_usage: HashMap<String, u64>, // timestamp millis
 }
 
 impl BotState {
@@ -100,3 +115,4 @@ impl BotState {
         }
     }
 }
+

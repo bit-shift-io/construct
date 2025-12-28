@@ -27,7 +27,7 @@ impl BridgeManager {
     ) {
         // Handle admin shell commands
         if msg_body.starts_with(',') {
-            crate::admin::handle_command(
+            crate::commands::admin::handle_command(
                 &self.config,
                 self.state.clone(),
                 room,
@@ -54,12 +54,13 @@ impl BridgeManager {
 
         // Support only . as command prefix for other commands
         if !msg_body.starts_with('.') {
-            // User sent a non-command message - reset last message tracking
+            // User sent a non-command message - reset tracking
             // so the next bot response will be a new message instead of editing
             {
                 let mut bot_state = self.state.lock().await;
                 let room_state = bot_state.get_room_state(&room.room_id());
                 room_state.last_message_event_id = None;
+                room_state.feed_event_id = None; // Also reset feed event ID
                 bot_state.save();
             }
             return;
@@ -104,10 +105,13 @@ impl BridgeManager {
             "no" => commands::handle_no(&self.config, self.state.clone(), room).await,
             "stop" => commands::handle_stop(self.state.clone(), room).await,
             "ask" => commands::handle_ask(&self.config, self.state.clone(), argument, room).await,
-            "reject" => commands::handle_reject(self.state.clone(), room).await,
+            "reject" => commands::handle_no(&self.config, self.state.clone(), room).await,
             "changes" => commands::handle_changes(self.state.clone(), room).await,
             "commit" => commands::handle_commit(self.state.clone(), argument, room).await,
             "discard" => commands::handle_discard(self.state.clone(), room).await,
+            "cleanup" => {
+                commands::handle_cleanup(&self.config, self.state.clone(), room, sender).await
+            }
             "build" => commands::handle_build(&self.config, self.state.clone(), room).await,
             "deploy" => commands::handle_deploy(&self.config, self.state.clone(), room).await,
             "check" => commands::handle_check(&self.config, self.state.clone(), room).await,

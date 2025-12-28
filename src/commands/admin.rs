@@ -117,11 +117,45 @@ pub async fn handle_command(
     };
 
     let display_output = if output.trim().is_empty() {
-        crate::prompts::STRINGS.messages.command_no_output.clone()
+        crate::prompts::STRINGS.messages.command_no_output
     } else {
-        crate::prompts::STRINGS.messages.code_block_output.replace("{}", &output)
+        &crate::prompts::STRINGS.messages.code_block_output.replace("{}", &output)
     };
+
 
     let _ = room.send_markdown(&display_output).await;
     let _ = room.typing(false).await;
+}
+
+/// Cleans up the current task context (admin only).
+pub async fn handle_cleanup<S: ChatService + Send + Sync>(
+    config: &AppConfig,
+    state: Arc<Mutex<BotState>>,
+    room: &S,
+    sender: &str,
+) {
+    // Check permissions
+    let sender_lower = sender.to_lowercase();
+    let is_admin = config.system.admin.iter().any(|u| u.to_lowercase() == sender_lower);
+
+    if !is_admin {
+        let _ = room.send_markdown(&crate::prompts::STRINGS.messages.admin_permission_denied.replace("{}", sender)).await;
+        return;
+    }
+
+    let mut bot_state = state.lock().await;
+    let room_state = bot_state.get_room_state(&room.room_id());
+    
+    room_state.active_task = None;
+    room_state.is_task_completed = false;
+    room_state.last_message_event_id = None;
+    room_state.feed_event_id = None;
+    room_state.feed_manager = None;
+    room_state.pending_command = None;
+    room_state.pending_agent_response = None;
+    room_state.stop_requested = false;
+    
+    bot_state.save();
+    
+    let _ = room.send_markdown("🧹 **State Cleaned**: Active task code and feed reset.").await;
 }

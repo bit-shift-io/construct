@@ -17,8 +17,6 @@ pub trait ChatService: Send + Sync {
     /// Edits a message by event ID.
     async fn edit_markdown(&self, event_id: &str, new_content: &str) -> Result<()>;
 
-    /// Edits the last sent markdown message (if tracked).
-    async fn edit_last_markdown(&self, content: &str) -> Result<()>;
 
     /// Sets the typing status.
     async fn typing(&self, active: bool) -> Result<()>;

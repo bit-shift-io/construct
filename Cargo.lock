@@ -436,7 +436,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
- "lazy_static",
  "matrix-sdk",
  "regex",
  "reqwest 0.11.27",
@@ -444,6 +443,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "tempfile",
  "tokio",
 ]
 

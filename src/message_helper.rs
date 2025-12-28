@@ -39,21 +39,6 @@ impl MessageHelper {
         Ok(())
     }
 
-    /// Send a plain text message, tracking the event ID for future edits
-    pub async fn send_plain(
-        &self,
-        room: &impl ChatService,
-        state: &mut BotState,
-        content: &str,
-    ) -> Result<(), String> {
-        let event_id = room.send_plain(content).await.map_err(|e| e.to_string())?;
-
-        let room_state = state.get_room_state(&self.room_id);
-        room_state.last_message_event_id = Some(event_id);
-        state.save();
-
-        Ok(())
-    }
 
     /// Edit the last message with new markdown content
     ///
@@ -69,7 +54,7 @@ impl MessageHelper {
 
         if let Some(event_id) = &room_state.last_message_event_id {
             // Try to edit the existing message
-            if let Err(e) = room.edit_markdown(event_id, content).await {
+            if let Err(_e) = room.edit_markdown(event_id, content).await {
                 // If editing fails, fall back to sending new message
                 // (e.g., message too old, doesn't exist, or API error)
                 self.send_markdown(room, state, content).await?;
@@ -85,15 +70,6 @@ impl MessageHelper {
         Ok(())
     }
 
-    /// Reset the last message tracking
-    ///
-    /// Call this when user sends input, so the next bot response
-    /// will be a new message instead of continuing to update the old one.
-    pub fn reset_last_message(&self, state: &mut BotState) {
-        let room_state = state.get_room_state(&self.room_id);
-        room_state.last_message_event_id = None;
-        state.save();
-    }
 
     /// Send or edit markdown based on context
     ///

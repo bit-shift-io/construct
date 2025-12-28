@@ -2,7 +2,12 @@ use super::ChatService;
 use anyhow::Result;
 use async_trait::async_trait;
 use matrix_sdk::room::Room;
-use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
+use matrix_sdk::ruma::events::relation::Replacement;
+use matrix_sdk::ruma::events::room::message::{
+    Relation, RoomMessageEventContent, RoomMessageEventContentWithoutRelation,
+};
+use matrix_sdk::ruma::EventId;
+use std::convert::TryFrom;
 
 #[derive(Clone)]
 pub struct MatrixService {
@@ -19,10 +24,17 @@ impl MatrixService {
     /// TODO: Implement proper Matrix message editing using m.relates_to with m.replace
     /// For now, this sends a new message with updated content
     /// The event ID tracking allows us to reference the original for future true editing
-    pub async fn edit_markdown(&self, _event_id: &str, new_content: &str) -> Result<()> {
-        // For now, just send a new message with the edited content
-        // Once we figure out the correct Matrix SDK API for edits, we'll update this
-        self.send_markdown(new_content).await?;
+    pub async fn edit_markdown(&self, event_id: &str, new_content: &str) -> Result<()> {
+        let event_id = <&EventId>::try_from(event_id)?;
+        let mut content = RoomMessageEventContent::text_markdown(new_content);
+        let replacement_content = RoomMessageEventContentWithoutRelation::from(content.clone());
+
+        content.relates_to = Some(Relation::Replacement(Replacement::new(
+            event_id.to_owned(),
+            replacement_content,
+        )));
+
+        self.room.send(content).await?;
         Ok(())
     }
 }
@@ -50,18 +62,9 @@ impl ChatService for MatrixService {
     }
 
     async fn edit_markdown(&self, event_id: &str, new_content: &str) -> Result<()> {
-        // For now, just send a new message with the edited content
-        // The event ID tracking ensures we can reference it later
-        self.send_markdown(new_content).await?;
-        Ok(())
+        self.edit_markdown(event_id, new_content).await
     }
 
-    async fn edit_last_markdown(&self, content: &str) -> Result<()> {
-        // Get the last message event ID from state
-        // This will be called by MessageHelper which has access to state
-        // For now, this is a placeholder - the actual editing happens in MessageHelper
-        Ok(())
-    }
 
     async fn typing(&self, active: bool) -> Result<()> {
         self.room.typing_notice(active).await?;
