@@ -139,6 +139,7 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
     active_agent: Option<String>,
     active_model: Option<String>,
     resume_existing_feed: bool,
+    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
 ) {
     let mut step_count = 0;
     let max_steps = 20;
@@ -311,7 +312,7 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
         };
 
         // Channel Init
-        let (input_tx, mut input_rx) = mpsc::channel::<String>(10);
+        let (input_tx, _input_rx) = mpsc::channel::<String>(10);
         {
             let mut bot_state = state.lock().await;
             let room_state = bot_state.get_room_state(room.room_id().as_str());
@@ -367,34 +368,56 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                                     .await;
                             }
 
-                            // Enhanced sandbox validation with file operation checks
-                            let sandbox = crate::utils::sandbox::Sandbox::new(
-                                std::env::current_dir().unwrap_or_default(),
-                            );
-                            let permission =
-                                sandbox.check_file_operation(&content, &config.commands);
+                            // Execute command using MCP tools or fallback to direct execution
+                            let cmd_result = {
+                                // Track directory changes for cd commands
+                                if content.trim().starts_with("cd ") {
+                                    if let Some(new_path) = track_directory_change(
+                                        &content,
+                                        &working_dir,
+                                        state.clone(),
+                                        &room_clone.room_id(),
+                                    )
+                                    .await
+                                    {
+                                        working_dir = Some(new_path);
+                                    }
+                                }
 
-                            let cmd_result = match permission {
-                                crate::utils::sandbox::PermissionResult::Allowed => {
-                                    // Track directory changes for cd commands
-                                    if content.trim().starts_with("cd ") {
-                                        if let Some(new_path) = track_directory_change(
+                                // Use MCP if available, otherwise fall back to direct execution
+                                let timeout_duration =
+                                    crate::commands::system::get_command_timeout(&content, &config);
+                                let timeout_secs = timeout_duration.as_secs();
+
+                                if let Some(mcp) = &mcp_manager {
+                                    let client = mcp.client();
+                                    match client
+                                        .lock()
+                                        .await
+                                        .execute_command(
                                             &content,
-                                            &working_dir,
-                                            state.clone(),
-                                            &room_clone.room_id(),
+                                            Some(timeout_secs),
+                                            working_dir.as_deref(),
                                         )
                                         .await
-                                        {
-                                            working_dir = Some(new_path);
+                                    {
+                                        Ok(o) => o,
+                                        Err(_e) => {
+                                            // Fallback to direct execution on MCP error
+                                            match crate::utils::run_shell_command_with_timeout(
+                                                &content,
+                                                working_dir.as_deref(),
+                                                Some(timeout_duration),
+                                            )
+                                            .await
+                                            {
+                                                Ok(o) => o,
+                                                Err(e) => e,
+                                            }
                                         }
                                     }
-
-                                    // Execute with intelligent timeout
-                                    let timeout_duration =
-                                        crate::commands::system::get_command_timeout(
-                                            &content, &config,
-                                        );
+                                } else {
+                                    // No MCP available, use direct execution
                                     match crate::utils::run_shell_command_with_timeout(
                                         &content,
                                         working_dir.as_deref(),
@@ -404,77 +427,6 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                                     {
                                         Ok(o) => o,
                                         Err(e) => e,
-                                    }
-                                }
-                                crate::utils::sandbox::PermissionResult::Blocked(r) => {
-                                    let msg = format!("🚫 **Blocked**: {}", r);
-                                    let _ = room_clone.send_markdown(&msg).await;
-                                    msg
-                                }
-                                crate::utils::sandbox::PermissionResult::Ask(_) => {
-                                    // PAUSE LOGIC
-                                    let mut bot_state = state.lock().await;
-                                    let room_state =
-                                        bot_state.get_room_state(room.room_id().as_str());
-                                    room_state.pending_command = Some(content.clone());
-                                    room_state.pending_agent_response = Some(response.clone());
-                                    feed_manager.pause();
-                                    room_state.feed_manager = Some(feed_manager.clone());
-                                    bot_state.save();
-                                    drop(bot_state);
-
-                                    if let Some(eid) = feed_manager.get_event_id() {
-                                        let _ = room_clone
-                                            .edit_markdown(eid, &feed_manager.get_feed_content())
-                                            .await;
-                                    }
-
-                                    let _ = room_clone
-                                        .send_markdown(
-                                            &crate::strings::STRINGS
-                                                .messages
-                                                .command_approval_request
-                                                .replace("{}", &content),
-                                        )
-                                        .await;
-
-                                    // AWAIT INPUT
-                                    if let Some(d) = input_rx.recv().await {
-                                        if d == "ok" {
-                                            // Track directory changes if approved
-                                            if content.trim().starts_with("cd ") {
-                                                if let Some(new_path) = track_directory_change(
-                                                    &content,
-                                                    &working_dir,
-                                                    state.clone(),
-                                                    &room_clone.room_id(),
-                                                )
-                                                .await
-                                                {
-                                                    working_dir = Some(new_path);
-                                                }
-                                            }
-
-                                            // Execute with intelligent timeout
-                                            let timeout_duration =
-                                                crate::commands::system::get_command_timeout(
-                                                    &content, &config,
-                                                );
-                                            match crate::utils::run_shell_command_with_timeout(
-                                                &content,
-                                                working_dir.as_deref(),
-                                                Some(timeout_duration),
-                                            )
-                                            .await
-                                            {
-                                                Ok(out) => out,
-                                                Err(e) => format!("Failed: {}", e),
-                                            }
-                                        } else {
-                                            "🚫 Denied.".to_string()
-                                        }
-                                    } else {
-                                        break; // Channel closed
                                     }
                                 }
                             };
@@ -725,6 +677,7 @@ pub async fn handle_stop(state: Arc<Mutex<BotState>>, room: &impl ChatService) {
 pub async fn handle_approve<S: ChatService + Clone + Send + 'static>(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
+    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
     room: &S,
 ) {
     let mut bot_state = state.lock().await;
@@ -778,6 +731,7 @@ pub async fn handle_approve<S: ChatService + Clone + Send + 'static>(
                 active_agent,
                 active_model,
                 false,
+                mcp_manager,
             )
             .await;
         });
@@ -792,6 +746,7 @@ pub async fn handle_approve<S: ChatService + Clone + Send + 'static>(
 pub async fn handle_continue<S: ChatService + Clone + Send + 'static>(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
+    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
     room: &S,
 ) {
     let mut bot_state = state.lock().await;
@@ -823,6 +778,7 @@ pub async fn handle_continue<S: ChatService + Clone + Send + 'static>(
                 active_agent,
                 active_model,
                 true,
+                mcp_manager,
             )
             .await;
         });
@@ -837,13 +793,14 @@ pub async fn handle_continue<S: ChatService + Clone + Send + 'static>(
 pub async fn handle_start<S: ChatService + Clone + Send + 'static>(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
+    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
     room: &S,
 ) {
     let should_continue = false; // logic removed/simplified as requested in orig file
     if should_continue {
-        handle_continue(config, state, room).await;
+        handle_continue(config, state, mcp_manager, room).await;
     } else {
-        handle_approve(config, state, room).await;
+        handle_approve(config, state, mcp_manager, room).await;
     }
 }
 
@@ -863,6 +820,7 @@ pub async fn handle_help(
 pub async fn handle_status(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
+    _mcp_manager: Option<Arc<crate::mcp::McpManager>>,
     room: &impl ChatService,
 ) {
     let mut bot_state = state.lock().await;
@@ -886,6 +844,7 @@ pub async fn handle_status(
 pub async fn handle_task<S: ChatService + Clone + Send + 'static>(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
+    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
     argument: &str,
     room: &S,
 ) {
@@ -897,7 +856,7 @@ pub async fn handle_task<S: ChatService + Clone + Send + 'static>(
         };
 
         if !wizard_active {
-            crate::commands::wizard::start_task_wizard(state.clone(), room).await;
+            crate::commands::wizard::start_task_wizard(state.clone(), mcp_manager, room).await;
             return;
         }
     }
@@ -1136,6 +1095,7 @@ pub async fn handle_task<S: ChatService + Clone + Send + 'static>(
 pub async fn handle_modify<S: ChatService + Clone + Send + 'static>(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
+    _mcp_manager: Option<Arc<crate::mcp::McpManager>>,
     argument: &str,
     room: &S,
 ) {
@@ -1254,6 +1214,7 @@ pub async fn handle_modify<S: ChatService + Clone + Send + 'static>(
 pub async fn handle_ok<S: ChatService + Clone + Send + 'static>(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
+    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
     room: &S,
 ) {
     let mut bot_state = state.lock().await;
@@ -1344,6 +1305,7 @@ pub async fn handle_ok<S: ChatService + Clone + Send + 'static>(
                 active_agent,
                 active_model,
                 true,
+                mcp_manager,
             )
             .await;
         });

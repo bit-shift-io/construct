@@ -328,6 +328,7 @@ pub async fn handle_model(state: Arc<Mutex<BotState>>, argument: &str, room: &im
 pub async fn handle_ask<S: ChatService + Clone + Send + 'static>(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
+    _mcp_manager: Option<Arc<crate::mcp::McpManager>>,
     argument: &str,
     room: &S,
 ) {

@@ -235,6 +235,31 @@ commands:
     medium: 120 # Standard commands (git, build, test, etc.)
     long: 600 # Long-running commands (cargo build, npm install, etc.)
 
+# ----------------------------------------------------------------------------
+# MCP (Model Context Protocol) Configuration
+# ----------------------------------------------------------------------------
+# MCP provides secure tool execution through a sidecar server.
+# The server enforces sandboxing and access controls for all agent operations.
+# ----------------------------------------------------------------------------
+mcp:
+  # Path to the MCP server binary
+  # Download from: https://github.com/modelcontextprotocol/rust-sdk
+  server_path: "./mcp-filesystem-server"
+
+  # Directories the MCP server is allowed to access
+  # Agent commands (.build, .read, etc.) are restricted to these directories
+  allowed_directories:
+    - "./projects"
+    - "./data"
+
+  # Enable read-only mode for additional safety
+  # When true, the agent cannot write files or execute commands
+  # Set to false when using .build, .deploy, .modify, etc.
+  readonly: false
+
+  # Default timeout in seconds for command execution
+  # Can be overridden per command based on command type
+  default_timeout: 120
 
 # ============================================================================
 # Quick Start Guide

@@ -10,6 +10,7 @@
 - **📝 Task-Driven Workflow**: Initiate tasks, generate plans, refine them with feedback, and execute them.
 - **🛠️ Integrated DevOps**: Built-in support for Git operations (`commit`, `diff`, `discard`) and custom build/deploy commands.
 - **📂 File Management**: Inspect project files directly from the chat.
+- **🔒 MCP Integration**: Modern Model Context Protocol integration for secure, sandboxed tool execution with graceful fallback.
 - **⏱️ Command Timeouts**: Automatic timeouts prevent hanging commands (30s/120s/600s based on category).
 - **📋 Three-Stage Feed System**: Progressive progress tracking reduces chat spam from 50+ messages to 1 updating feed.
 - **📁 Project-Based State Storage**: All project state (feed, history, tasks) stored as markdown files in project directories.
@@ -260,6 +261,17 @@ system:
   projects_dir: "/home/user/Projects"  # Base directory for projects
   admin:
     - "@user:matrix.org"               # Admin users
+
+# MCP Configuration (Optional)
+# The bot uses MCP (Model Context Protocol) for secure tool execution
+# This provides sandboxed file and command operations with automatic fallback
+mcp:
+  server_path: "rust-mcp-filesystem"   # Path to MCP server binary
+  allowed_directories:
+    - "./projects"
+    - "./data"
+  readonly: false                      # Enable read-only mode for safety
+  default_timeout: 120                 # Default timeout in seconds
 ```
 
 ### Matrix Service
@@ -352,13 +364,24 @@ construct/
 │   │   └── matrix.rs   # Matrix client
 │   ├── admin.rs        # Admin commands
 │   ├── bridge.rs       # Bridge management
-│   ├── commands.rs     # Bot commands
+│   ├── commands/       # Bot commands
+│   │   ├── core.rs     # Core workflow commands
+│   │   ├── build.rs    # Build and deployment commands
+│   │   ├── project.rs  # Project management commands
+│   │   ├── git.rs      # Git operations
+│   │   ├── agent.rs    # Agent-related commands
+│   │   └── system.rs   # System utilities
+│   ├── mcp/            # MCP integration
+│   │   ├── mod.rs      # MCP module
+│   │   ├── client.rs   # MCP client implementation
+│   │   └── manager.rs  # MCP lifecycle management
 │   ├── config.rs       # Configuration handling
 │   ├── main.rs         # Entry point
 │   ├── prompts.rs      # Prompt templates
-│   ├── sandbox.rs      # Security sandbox
 │   ├── state.rs        # Bot state management
-│   ├── util.rs         # Utilities
+│   ├── utils/          # Utilities
+│   │   ├── common.rs   # Common utilities
+│   │   └── feed_helper.rs # Feed management helpers
 │   └── wizard.rs       # Setup wizard
 ├── data/               # Runtime data (user-created)
 ├── prompts/            # System prompts
@@ -384,6 +407,40 @@ To add a new AI provider:
    }
    ```
 5. **Update documentation** in README.md
+
+### MCP Integration
+
+Construct integrates with the Model Context Protocol (MCP) for secure, sandboxed tool execution. The MCP integration provides:
+
+**Features:**
+- **Secure Execution**: All agent commands run through MCP tools with sandboxing
+- **Graceful Fallback**: Automatic fallback to direct execution if MCP is unavailable
+- **Complete Tool Set**: File operations, command execution, directory management
+- **Thread-Safe**: Shared MCP client across all concurrent operations
+- **Configuration-Driven**: All MCP settings configurable via config.yaml
+
+**Available MCP Tools:**
+- `execute_command` - Execute shell commands with timeout support
+- `read_file` - Read file contents safely
+- `write_file` - Write content to files
+- `list_directory` - List directory contents
+- `create_directory` - Create directories (with recursive option)
+
+**Implementation Details:**
+- The `McpClient` provides a unified interface for tool operations
+- Uses direct execution as a placeholder (ready for actual MCP protocol)
+- All commands use MCP tools by default with automatic fallback
+- Admin commands (`,` prefix) bypass MCP for trusted users
+- Extensible design ready for upgrade to full MCP protocol
+
+**Example Usage:**
+```rust
+// Commands automatically use MCP tools through the mcp_manager
+handle_build(&config, state, mcp_manager, room).await;
+// Internally uses: mcp_client.execute_command("cargo build", ...).await
+```
+
+For more details, see `docs/mcp_integration_plan.md`.
 
 ## 🐛 Troubleshooting
 

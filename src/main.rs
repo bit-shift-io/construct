@@ -4,6 +4,7 @@ mod agent;
 mod bridge;
 mod commands;
 mod config;
+mod mcp;
 
 mod features;
 mod patterns;
@@ -42,6 +43,7 @@ use std::time::SystemTime;
 /// Using OnceLock for safe global access.
 static CONFIG: OnceLock<AppConfig> = OnceLock::new();
 static BRIDGE_MANAGER: OnceLock<Arc<BridgeManager>> = OnceLock::new();
+static MCP_MANAGER: OnceLock<Option<Arc<crate::mcp::McpManager>>> = OnceLock::new();
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -83,7 +85,36 @@ async fn main() -> Result<()> {
 
     // 2. Initialize global state and manager
     let state = Arc::new(Mutex::new(BotState::load()));
-    let bridge_manager = Arc::new(BridgeManager::new(config.clone(), state.clone()));
+
+    // Initialize MCP Manager (optional - will continue without it if it fails)
+    let mcp_manager = match crate::mcp::McpManager::new(
+        &config.mcp.server_path,
+        &config.mcp.allowed_directories,
+        config.mcp.readonly,
+    )
+    .await
+    {
+        Ok(manager) => {
+            tracing::info!(
+                "MCP sidecar started successfully with allowed directories: {:?}",
+                config.mcp.allowed_directories
+            );
+            Some(Arc::new(manager))
+        }
+        Err(e) => {
+            tracing::error!("Failed to start MCP sidecar: {}", e);
+            tracing::warn!("Continuing without MCP - admin commands will still work");
+            None
+        }
+    };
+
+    MCP_MANAGER.set(mcp_manager.clone()).ok();
+
+    let bridge_manager = Arc::new(BridgeManager::new(
+        config.clone(),
+        state.clone(),
+        mcp_manager.clone(),
+    ));
 
     CONFIG.set(config.clone()).ok();
     BRIDGE_MANAGER.set(bridge_manager).ok();
@@ -95,6 +126,8 @@ async fn main() -> Result<()> {
             .config_loaded
             .replace("{}", &config.services.matrix.username)
     );
+
+    // 3. Setup Matrix Client
 
     // 3. Setup Matrix Client
     let client = Client::builder()
@@ -191,7 +224,7 @@ async fn main() -> Result<()> {
     });
 
     // 7. Initialize Room states from bridges
-    setup_bridges(&client, &config, state.clone()).await;
+    setup_bridges(&client, &config, state.clone(), mcp_manager.clone()).await;
 
     // 8. Graceful Shutdown
     match tokio::signal::ctrl_c().await {
@@ -210,7 +243,12 @@ async fn main() -> Result<()> {
 }
 
 /// Iterates through configured bridges and joins necessary Matrix rooms.
-async fn setup_bridges(client: &Client, config: &AppConfig, state: Arc<Mutex<BotState>>) {
+async fn setup_bridges(
+    client: &Client,
+    config: &AppConfig,
+    state: Arc<Mutex<BotState>>,
+    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
+) {
     for (bridge_name, entries) in &config.bridges {
         for entry in entries {
             if entry.service.as_deref() == Some("matrix") {
@@ -245,7 +283,13 @@ async fn setup_bridges(client: &Client, config: &AppConfig, state: Arc<Mutex<Bot
 
                             // Send status message instead of welcome message
                             let service = MatrixService::new(room);
-                            crate::commands::handle_status(&config, state.clone(), &service).await;
+                            crate::commands::handle_status(
+                                &config,
+                                state.clone(),
+                                mcp_manager.clone(),
+                                &service,
+                            )
+                            .await;
                         }
                     }
                 }

@@ -9,6 +9,7 @@ use tracing;
 
 pub async fn start_new_project_wizard<S: ChatService + Clone + Send + 'static>(
     state: Arc<Mutex<BotState>>,
+    #[allow(unused_variables)] mcp_manager: Option<Arc<crate::mcp::McpManager>>,
     room: &S,
 ) {
     let (mut feed_manager, initial_msg) = {
@@ -56,6 +57,7 @@ pub async fn start_new_project_wizard<S: ChatService + Clone + Send + 'static>(
 
 pub async fn start_task_wizard<S: ChatService + Clone + Send + 'static>(
     state: Arc<Mutex<BotState>>,
+    #[allow(unused_variables)] mcp_manager: Option<Arc<crate::mcp::McpManager>>,
     room: &S,
 ) {
     let (mut feed_manager, initial_msg) = {
@@ -104,6 +106,7 @@ pub async fn start_task_wizard<S: ChatService + Clone + Send + 'static>(
 pub async fn handle_input<S: ChatService + Clone + Send + 'static>(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
+    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
     room: &S,
     input: &str,
 ) {
@@ -122,13 +125,13 @@ pub async fn handle_input<S: ChatService + Clone + Send + 'static>(
 
     // Check for explicit restart
     if input == ".new" {
-        start_new_project_wizard(state.clone(), room).await;
+        start_new_project_wizard(state.clone(), mcp_manager, room).await;
         return;
     }
 
     // Check for task restart
     if input == ".task" {
-        start_task_wizard(state.clone(), room).await;
+        start_task_wizard(state.clone(), mcp_manager, room).await;
         return;
     }
 
@@ -163,7 +166,7 @@ pub async fn handle_input<S: ChatService + Clone + Send + 'static>(
             if input.trim() == ".ok" {
                 // Finalize description
                 // SKIP Confirmation, go straight to finish
-                finish_wizard(config, state.clone(), room).await;
+                finish_wizard(config, state.clone(), mcp_manager, room).await;
             } else {
                 // Append to buffer
                 append_buffer(state.clone(), room, input).await;
@@ -180,7 +183,7 @@ pub async fn handle_input<S: ChatService + Clone + Send + 'static>(
         Some(WizardStep::Confirmation) => {
             if input.trim() == ".ok" {
                 // Trigger generation
-                finish_wizard(config, state.clone(), room).await;
+                finish_wizard(config, state.clone(), mcp_manager, room).await;
             } else {
                 let _ = room
                     .send_markdown("Type .ok to generate or .cancel to abort.")
@@ -275,6 +278,7 @@ async fn render_step<S: ChatService + Clone + Send + 'static>(
 async fn finish_wizard<S: ChatService + Clone + Send + 'static>(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
+    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
     room: &S,
 ) {
     let mode = {
@@ -297,7 +301,8 @@ async fn finish_wizard<S: ChatService + Clone + Send + 'static>(
             .prompts
             .task_requirements_prompt
             .replace("{}", &desc);
-        crate::commands::handle_task(config, state.clone(), &prompt, room).await;
+        crate::commands::handle_task(config, state.clone(), mcp_manager.clone(), &prompt, room)
+            .await;
         return;
     }
 
@@ -318,7 +323,7 @@ async fn finish_wizard<S: ChatService + Clone + Send + 'static>(
 
     // 1. Create Project Dir
     // Replaced create_new_project with handle_new
-    crate::commands::handle_new(config, state.clone(), &name, room).await;
+    crate::commands::handle_new(config, state.clone(), mcp_manager.clone(), &name, room).await;
 
     // Retrieve the just-created project path
     let (project_path, projects_dir) = {
@@ -363,5 +368,5 @@ async fn finish_wizard<S: ChatService + Clone + Send + 'static>(
         .replace("{WORKDIR}", &display_path);
 
     // 2. Start Task
-    crate::commands::handle_task(config, state.clone(), &prompt, room).await;
+    crate::commands::handle_task(config, state.clone(), mcp_manager.clone(), &prompt, room).await;
 }

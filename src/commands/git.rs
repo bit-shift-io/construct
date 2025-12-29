@@ -1,16 +1,35 @@
 use crate::services::ChatService;
 use crate::state::BotState;
-use crate::utils::run_command;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// Shows current git changes in the active project.
-pub async fn handle_changes(state: Arc<Mutex<BotState>>, room: &impl ChatService) {
+/// Shows uncommitted changes using `git diff`.
+pub async fn handle_changes(
+    state: Arc<Mutex<BotState>>,
+    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
+    room: &impl ChatService,
+) {
     let mut bot_state = state.lock().await;
     let room_state = bot_state.get_room_state(&room.room_id());
-    let response = match run_command("git diff", room_state.current_project_path.as_deref()).await {
-        Ok(o) => o,
-        Err(e) => e,
+    let working_dir = room_state.current_project_path.as_deref();
+    let response = if let Some(mcp) = &mcp_manager {
+        // Use MCP client
+        let client = mcp.client();
+        let mut locked_client = client.lock().await;
+        match locked_client
+            .execute_command("git diff", Some(30), working_dir)
+            .await
+        {
+            Ok(o) => o,
+            Err(e) => e.to_string(),
+        }
+    } else {
+        // Fallback to direct execution
+        match crate::utils::run_command("git diff", working_dir).await {
+            Ok(o) => o,
+            Err(e) => e,
+        }
     };
     let _ = room
         .send_markdown(
@@ -23,9 +42,16 @@ pub async fn handle_changes(state: Arc<Mutex<BotState>>, room: &impl ChatService
 }
 
 /// Commits changes in the active project.
-pub async fn handle_commit(state: Arc<Mutex<BotState>>, argument: &str, room: &impl ChatService) {
+/// Commits changes with a message.
+pub async fn handle_commit(
+    state: Arc<Mutex<BotState>>,
+    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
+    argument: &str,
+    room: &impl ChatService,
+) {
     let mut bot_state = state.lock().await;
     let room_state = bot_state.get_room_state(&room.room_id());
+    let working_dir = room_state.current_project_path.as_deref();
     if argument.is_empty() {
         let _ = room
             .send_markdown(&crate::strings::STRINGS.messages.please_commit_msg)
@@ -33,9 +59,23 @@ pub async fn handle_commit(state: Arc<Mutex<BotState>>, argument: &str, room: &i
     } else {
         // Note: Git command construction is internal info, kept as format!
         let cmd = format!("git add . && git commit -m \"{}\"", argument);
-        let resp = match run_command(&cmd, room_state.current_project_path.as_deref()).await {
-            Ok(o) => o,
-            Err(e) => e,
+        let resp = if let Some(mcp) = &mcp_manager {
+            // Use MCP client
+            let client = mcp.client();
+            let mut locked_client = client.lock().await;
+            match locked_client
+                .execute_command(&cmd, Some(30), working_dir)
+                .await
+            {
+                Ok(o) => o,
+                Err(e) => e.to_string(),
+            }
+        } else {
+            // Fallback to direct execution
+            match crate::utils::run_command(&cmd, working_dir).await {
+                Ok(o) => o,
+                Err(e) => e,
+            }
         };
         let _ = room
             .send_markdown(
@@ -49,10 +89,26 @@ pub async fn handle_commit(state: Arc<Mutex<BotState>>, argument: &str, room: &i
 }
 
 /// Discards uncommitted changes in the active project.
-pub async fn handle_discard(state: Arc<Mutex<BotState>>, room: &impl ChatService) {
+/// Discards uncommitted changes.
+pub async fn handle_discard(
+    state: Arc<Mutex<BotState>>,
+    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
+    room: &impl ChatService,
+) {
     let mut bot_state = state.lock().await;
     let room_state = bot_state.get_room_state(&room.room_id());
-    let _ = run_command("git checkout .", room_state.current_project_path.as_deref()).await;
+    let working_dir = room_state.current_project_path.as_deref();
+    if let Some(mcp) = &mcp_manager {
+        // Use MCP client
+        let client = mcp.client();
+        let mut locked_client = client.lock().await;
+        let _ = locked_client
+            .execute_command("git checkout .", Some(30), working_dir)
+            .await;
+    } else {
+        // Fallback to direct execution
+        let _ = crate::utils::run_command("git checkout .", working_dir).await;
+    }
     let _ = room
         .send_markdown(&crate::strings::STRINGS.messages.changes_discarded)
         .await;
