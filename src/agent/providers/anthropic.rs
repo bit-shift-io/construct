@@ -16,12 +16,14 @@
 //!   claude:
 //!     protocol: "claude"  # or "anthropic"
 //!     model: "claude-3-5-sonnet-20241022"
+//!     requests_per_minute: 50  # Rate limiting (optional)
 //! ```
 
 use rig::client::CompletionClient;
 use rig::providers::anthropic;
 
 use crate::agent::AgentContext;
+use crate::agent::rate_limiter::RateLimiter;
 use crate::config::AgentConfig;
 
 /// Default model for Anthropic provider
@@ -41,13 +43,23 @@ pub async fn execute(
     context: &AgentContext,
     model_name: &str,
 ) -> Result<String, String> {
-    let client = anthropic::Client::from_env();
-    let agent = client.agent(model_name).build();
+    let rate_limiter = RateLimiter::from_config(config, 3);
 
-    agent
-        .prompt(&context.prompt)
+    rate_limiter
+        .execute_with_retry(
+            || async {
+                let client = anthropic::Client::from_env();
+                let agent = client.agent(model_name).build();
+
+                agent
+                    .prompt(&context.prompt)
+                    .await
+                    .map_err(|e| e.to_string())
+            },
+            context,
+            "anthropic",
+        )
         .await
-        .map_err(|e| e.to_string())
 }
 
 /// Get the default model name for Anthropic

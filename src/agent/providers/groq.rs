@@ -24,6 +24,7 @@ use rig::completion::Prompt;
 use rig::providers::openai;
 
 use crate::agent::AgentContext;
+use crate::agent::rate_limiter::RateLimiter;
 use crate::config::AgentConfig;
 
 /// Default model for Groq provider
@@ -39,24 +40,34 @@ pub const DEFAULT_MODEL: &str = "llama-3.3-70b-versatile";
 /// # Returns
 /// The model's response as a String, or an error message
 pub async fn execute(
-    _config: &AgentConfig,
+    config: &AgentConfig,
     context: &AgentContext,
     model_name: &str,
 ) -> Result<String, String> {
-    let api_key = std::env::var("GROQ_API_KEY").map_err(|_| "Missing GROQ_API_KEY")?;
+    let rate_limiter = RateLimiter::from_config(config, 3);
 
-    unsafe {
-        std::env::set_var("OPENAI_BASE_URL", "https://api.groq.com/openai/v1");
-        std::env::set_var("OPENAI_API_KEY", &api_key);
-    }
+    rate_limiter
+        .execute_with_retry(
+            || async {
+                let api_key = std::env::var("GROQ_API_KEY").map_err(|_| "Missing GROQ_API_KEY")?;
 
-    let client = openai::Client::from_env();
-    let agent = client.agent(model_name).build();
+                unsafe {
+                    std::env::set_var("OPENAI_BASE_URL", "https://api.groq.com/openai/v1");
+                    std::env::set_var("OPENAI_API_KEY", &api_key);
+                }
 
-    agent
-        .prompt(&context.prompt)
+                let client = openai::Client::from_env();
+                let agent = client.agent(model_name).build();
+
+                agent
+                    .prompt(&context.prompt)
+                    .await
+                    .map_err(|e| e.to_string())
+            },
+            context,
+            "groq",
+        )
         .await
-        .map_err(|e| e.to_string())
 }
 
 /// Get the default model name for Groq

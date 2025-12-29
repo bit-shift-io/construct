@@ -48,6 +48,24 @@ pub fn parse_actions(response: &str) -> Vec<AgentAction> {
     actions
 }
 
+/// Log parsed actions for debugging
+pub fn log_actions(actions: &[AgentAction]) {
+    for (i, action) in actions.iter().enumerate() {
+        match action {
+            AgentAction::ShellCommand(cmd) => {
+                log_interaction(
+                    "ACTION_PARSED",
+                    "system",
+                    &format!("Action {}: ShellCommand({})", i, cmd),
+                );
+            }
+            AgentAction::Done => {
+                log_interaction("ACTION_PARSED", "system", &format!("Action {}: Done", i));
+            }
+        }
+    }
+}
+
 /// Helper to run a shell command and return stdout/stderr.
 pub async fn run_command(command: &str, folder: Option<&str>) -> Result<String, String> {
     use tokio::process::Command;
@@ -151,8 +169,12 @@ pub async fn run_shell_command_with_timeout(
         format!("{}\n{}", stdout, stderr)
     };
 
-    // Always append exit code so agent knows it finished
-    let final_output = format!("{}\n[Exit Code: {}]", combined.trim(), code);
+    // Only append exit code for failed commands to reduce noise
+    let final_output = if code == 0 {
+        combined.trim().to_string()
+    } else {
+        format!("{}\n[Exit Code: {}]", combined.trim(), code)
+    };
 
     // Log the output
     log_interaction(
@@ -168,19 +190,37 @@ pub async fn run_shell_command_with_timeout(
     }
 }
 
-pub fn log_interaction(kind: &str, provider: &str, content: &str) {
-    use std::io::Write;
+/// Dedicated agent log writer utility that writes to agent.log file
+/// This is the centralized function for all agent-related logging
+pub fn log_to_agent_file(kind: &str, provider: &str, content: &str) {
     let timestamp = chrono::Local::now().to_rfc3339();
     let log_entry = format!(
         "--- [{}] {} ({}) ---\n{}\n\n",
         timestamp, kind, provider, content
     );
 
+    use std::io::Write;
     if let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open("data/agent.log")
+        .open("./data/agent.log")
     {
         let _ = file.write_all(log_entry.as_bytes());
     }
+}
+
+pub fn log_interaction(kind: &str, provider: &str, content: &str) {
+    use tracing::info;
+    let timestamp = chrono::Local::now().to_rfc3339();
+
+    info!(
+        kind = kind,
+        provider = provider,
+        timestamp = %timestamp,
+        "--- {} ({}) ---\n{}",
+        kind, provider, content
+    );
+
+    // Also write to agent.log file for persistence
+    log_to_agent_file(kind, provider, content);
 }

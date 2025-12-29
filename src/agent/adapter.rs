@@ -7,6 +7,8 @@ use rig::{
     providers::{anthropic, openai, zai},
 };
 
+use super::rate_limiter::RateLimiter;
+
 pub struct UnifiedAgent {
     pub provider: String,
     pub config: Option<AgentConfig>,
@@ -100,25 +102,13 @@ struct GeminiSafetySetting {
 #[async_trait]
 impl Agent for UnifiedAgent {
     async fn execute(&self, context: &AgentContext) -> Result<String, String> {
-        // Logging Helper
-        let log_interaction = |kind: &str, provider: &str, content: &str| {
-            let timestamp = chrono::Local::now().to_rfc3339();
-            let log_entry = format!(
-                "--- [{}] {} ({}) ---\n{}\n\n",
-                timestamp, kind, provider, content
-            );
-
-            use std::io::Write;
-            if let Ok(mut file) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open("/data/agent.log")
-            {
-                let _ = file.write_all(log_entry.as_bytes());
-            }
-        };
-
-        log_interaction("PROMPT", &self.provider, &context.prompt);
+        // Use shared logging utility
+        crate::utils::log_to_agent_file(
+            "AGENT_START",
+            &self.provider,
+            &format!("Starting agent execution with model: {:?}", context.model),
+        );
+        crate::utils::log_to_agent_file("PROMPT", &self.provider, &context.prompt);
 
         let result = async {
             let config = self.config.as_ref().ok_or("Agent not configured")?;
@@ -164,16 +154,32 @@ impl Agent for UnifiedAgent {
                         std::env::var("ZAI_API_KEY").map_err(|_| "Missing ZAI_API_KEY")?
                     };
 
-                    unsafe {
-                        std::env::set_var("ZAI_API_KEY", &api_key);
-                    }
+                    let rate_limiter = RateLimiter::from_config(config, 3);
+                    let context_clone = context.clone();
 
-                    let client = zai::Client::from_env();
-                    let agent = client.agent(&model_name).build();
-                    agent
-                        .prompt(&context.prompt)
+                    rate_limiter
+                        .execute_with_retry(
+                            move || {
+                                let model_name = model_name.clone();
+                                let prompt = context.prompt.clone();
+                                let api_key = api_key.clone();
+                                async move {
+                                    unsafe {
+                                        std::env::set_var("ZAI_API_KEY", &api_key);
+                                    }
+
+                                    let client = zai::Client::from_env();
+                                    let agent = client.agent(&model_name).build();
+                                    agent
+                                        .prompt(&prompt)
+                                        .await
+                                        .map_err(|e| e.to_string())
+                                }
+                            },
+                            &context_clone,
+                            "zai",
+                        )
                         .await
-                        .map_err(|e| e.to_string())
                 }
                 "gemini" => {
                     let api_key = if let Some(key) = &config.api_key {
@@ -251,7 +257,7 @@ impl Agent for UnifiedAgent {
                             model, api_key
                         );
 
-                        log_interaction("DEBUG", "gemini", &format!("Attempting Model: {}", model));
+                        crate::utils::log_to_agent_file("DEBUG", "gemini", &format!("Attempting Model: {}", model));
 
                         // Aggressive sanitization
                         let mut sanitized_prompt = context.prompt
@@ -298,7 +304,7 @@ impl Agent for UnifiedAgent {
                             match resp_result {
                                 Err(e) => {
                                     last_error = format!("Network Error ({}): {}", model, e);
-                                    log_interaction("ERROR", "gemini", &format!("Model {} failed (Attempt {}/{}): {}", model, attempt, max_retries, last_error));
+                                    crate::utils::log_to_agent_file("ERROR", "gemini", &format!("Model {} failed (Attempt {}/{}): {}", model, attempt, max_retries, last_error));
 
                                     // Dynamic delay based on RPM (default to 2 RPM / 30s if not set)
                                     let delay = if let Some(rpm) = config.requests_per_minute {
@@ -340,7 +346,7 @@ impl Agent for UnifiedAgent {
                                         // Quota retry handling
                                         if text.contains("429") || text.to_lowercase().contains("too many requests") || status.as_u16() >= 500 {
                                             last_error = format!("API Error {} (Attempt {}/{}): {}", status, attempt, max_retries, text);
-                                            log_interaction("WARNING", "gemini", &format!("Transient Error: {}", last_error));
+                                            crate::utils::log_to_agent_file("WARNING", "gemini", &format!("Transient Error: {}", last_error));
 
                                             if attempt < max_retries {
                                                 // Dynamic delay based on RPM
@@ -391,12 +397,12 @@ impl Agent for UnifiedAgent {
 
                                         if text.contains("404") {
                                             last_error = format!("Model Not Found ({})", model);
-                                            log_interaction("ERROR", "gemini", &format!("Model {} 404 Not Found", model));
+                                            crate::utils::log_to_agent_file("ERROR", "gemini", &format!("Model {} 404 Not Found", model));
                                             should_switch_model = true;
                                             break;
                                         }
                                         last_error = format!("API Error ({}) {}: {}", model, status, text);
-                                        log_interaction("ERROR", "gemini", &format!("Model {} API Error: {}", model, text));
+                                        crate::utils::log_to_agent_file("ERROR", "gemini", &format!("Model {} API Error: {}", model, text));
                                         should_switch_model = true; // Non-retriable error
                                         break;
                                     }
@@ -435,7 +441,7 @@ impl Agent for UnifiedAgent {
 
                                             if safety_blocked {
                                                 let msg = format!("Safety Block ({}) Reason: {}. Switching model...", model, block_reason);
-                                                log_interaction("WARNING", "gemini", &msg);
+                                                crate::utils::log_to_agent_file("WARNING", "gemini", &msg);
                                                 if let Some(cb) = &context.status_callback {
                                                     cb(format!("⚠️ {}", msg));
                                                 }
@@ -475,39 +481,70 @@ impl Agent for UnifiedAgent {
                      Err(last_error)
                 }
                 "claude" | "anthropic" => {
-                    let client = anthropic::Client::from_env();
-                    let agent = client.agent(&model_name).build();
-                    agent
-                        .prompt(&context.prompt)
+                    let rate_limiter = RateLimiter::from_config(config, 3);
+                    let context_clone = context.clone();
+
+                    rate_limiter
+                        .execute_with_retry(
+                            move || {
+                                let model_name = model_name.clone();
+                                let prompt = context.prompt.clone();
+                                async move {
+                                    let client = anthropic::Client::from_env();
+                                    let agent = client.agent(&model_name).build();
+                                    agent
+                                        .prompt(&prompt)
+                                        .await
+                                        .map_err(|e| e.to_string())
+                                }
+                            },
+                            &context_clone,
+                            "anthropic",
+                        )
                         .await
-                        .map_err(|e| e.to_string())
                 }
                 "deepai" | "deep_ai" => {
-                    // Resolved API Key for DeepAI
-                    let api_key = if let Some(k) = &config.api_key {
-                        k.clone()
-                    } else {
-                        std::env::var("DEEPAI_API_KEY").map_err(|_| "Missing DEEPAI_API_KEY")?
-                    };
+                    let rate_limiter = RateLimiter::from_config(config, 3);
+                    let config_clone = config.clone();
+                    let context_clone = context.clone();
 
-                    let client = reqwest::Client::new();
-                    let resp = client
-                        .post("https://api.deepai.org/api/text-generator")
-                        .header("api-key", api_key)
-                        .form(&[("text", &context.prompt)])
-                        .send()
+                    rate_limiter
+                        .execute_with_retry(
+                            move || {
+                                let prompt = context.prompt.clone();
+                                let config = config_clone.clone();
+                                async move {
+                                    // Resolved API Key for DeepAI
+                                    let api_key = if let Some(k) = &config.api_key {
+                                        k.clone()
+                                    } else {
+                                        std::env::var("DEEPAI_API_KEY").map_err(|_| "Missing DEEPAI_API_KEY")?
+                                    };
+
+                                    let client = reqwest::Client::new();
+                                    let resp = client
+                                        .post("https://api.deepai.org/api/text-generator")
+                                        .header("api-key", api_key)
+                                        .form(&[("text", &prompt)])
+                                        .send()
+                                        .await
+                                        .map_err(|e| crate::strings::STRINGS.messages.deepai_request_failed.replace("{}", &e.to_string()))?;
+
+                                    if !resp.status().is_success() {
+                                        return Err(crate::strings::STRINGS.messages.deepai_api_error.replace("{}", &resp.status().to_string()));
+                                    }
+
+                                    let body: DeepAIResponse = resp
+                                        .json()
+                                        .await
+                                        .map_err(|e| crate::strings::STRINGS.messages.deepai_parse_error.replace("{}", &e.to_string()))?;
+                                    Ok(body.output)
+                                }
+                            },
+                            &context_clone,
+                            "deepai",
+                        )
                         .await
-                        .map_err(|e| crate::strings::STRINGS.messages.deepai_request_failed.replace("{}", &e.to_string()))?;
-
-                    if !resp.status().is_success() {
-                        return Err(crate::strings::STRINGS.messages.deepai_api_error.replace("{}", &resp.status().to_string()));
-                    }
-
-                    let body: DeepAIResponse = resp
-                        .json()
-                        .await
-                        .map_err(|e| crate::strings::STRINGS.messages.deepai_parse_error.replace("{}", &e.to_string()))?;
-                    Ok(body.output)
                 }
                 "copilot" | "github_copilot" => {
                     // Wrapper for CLI until Rig supports it natively
@@ -524,44 +561,91 @@ impl Agent for UnifiedAgent {
                     crate::utils::run_command(&cmd, context.working_dir.as_deref()).await
                 }
                 "openai" => {
-                    let client = openai::Client::from_env();
-                    let agent = client.agent(&model_name).build();
-                    agent
-                        .prompt(&context.prompt)
+                    let rate_limiter = RateLimiter::from_config(config, 3);
+                    let context_clone = context.clone();
+
+                    rate_limiter
+                        .execute_with_retry(
+                            move || {
+                                let model_name = model_name.clone();
+                                let prompt = context.prompt.clone();
+                                async move {
+                                    let client = openai::Client::from_env();
+                                    let agent = client.agent(&model_name).build();
+                                    agent
+                                        .prompt(&prompt)
+                                        .await
+                                        .map_err(|e| e.to_string())
+                                }
+                            },
+                            &context_clone,
+                            "openai",
+                        )
                         .await
-                        .map_err(|e| e.to_string())
                 }
                 "xai" => {
-                    unsafe {
-                        std::env::set_var("OPENAI_BASE_URL", "https://api.x.ai/v1");
-                        std::env::set_var("OPENAI_API_KEY", std::env::var("XAI_API_KEY").map_err(|_| "Missing XAI_API_KEY")?);
-                    }
-                    let client = openai::Client::from_env();
-                    let agent = client.agent(&model_name).build();
-                    agent
-                        .prompt(&context.prompt)
+                    let rate_limiter = RateLimiter::from_config(config, 3);
+                    let context_clone = context.clone();
+
+                    rate_limiter
+                        .execute_with_retry(
+                            move || {
+                                let model_name = model_name.clone();
+                                let prompt = context.prompt.clone();
+                                async move {
+                                    let api_key = std::env::var("XAI_API_KEY").map_err(|_| "Missing XAI_API_KEY")?;
+                                    unsafe {
+                                        std::env::set_var("OPENAI_BASE_URL", "https://api.x.ai/v1");
+                                        std::env::set_var("OPENAI_API_KEY", &api_key);
+                                    }
+                                    let client = openai::Client::from_env();
+                                    let agent = client.agent(&model_name).build();
+                                    agent
+                                        .prompt(&prompt)
+                                        .await
+                                        .map_err(|e| e.to_string())
+                                }
+                            },
+                            &context_clone,
+                            "xai",
+                        )
                         .await
-                        .map_err(|e| e.to_string())
                 }
                 "groq" => {
-                    unsafe {
-                        std::env::set_var("OPENAI_BASE_URL", "https://api.groq.com/openai/v1");
-                        std::env::set_var("OPENAI_API_KEY", std::env::var("GROQ_API_KEY").map_err(|_| "Missing GROQ_API_KEY")?);
-                    }
-                    let client = openai::Client::from_env();
-                    let agent = client.agent(&model_name).build();
-                    agent
-                        .prompt(&context.prompt)
+                    let rate_limiter = RateLimiter::from_config(config, 3);
+                    let context_clone = context.clone();
+
+                    rate_limiter
+                        .execute_with_retry(
+                            move || {
+                                let model_name = model_name.clone();
+                                let prompt = context.prompt.clone();
+                                async move {
+                                    let api_key = std::env::var("GROQ_API_KEY").map_err(|_| "Missing GROQ_API_KEY")?;
+                                    unsafe {
+                                        std::env::set_var("OPENAI_BASE_URL", "https://api.groq.com/openai/v1");
+                                        std::env::set_var("OPENAI_API_KEY", &api_key);
+                                    }
+                                    let client = openai::Client::from_env();
+                                    let agent = client.agent(&model_name).build();
+                                    agent
+                                        .prompt(&prompt)
+                                        .await
+                                        .map_err(|e| e.to_string())
+                                }
+                            },
+                            &context_clone,
+                            "groq",
+                        )
                         .await
-                        .map_err(|e| e.to_string())
                 }
                 _ => Err(crate::strings::STRINGS.messages.unsupported_provider.replace("{}", &self.provider)),
             }
         }.await;
 
         match &result {
-            Ok(content) => log_interaction("RESPONSE", &self.provider, content),
-            Err(e) => log_interaction("ERROR", &self.provider, e),
+            Ok(content) => crate::utils::log_to_agent_file("RESPONSE", &self.provider, content),
+            Err(e) => crate::utils::log_to_agent_file("ERROR", &self.provider, e),
         }
 
         result

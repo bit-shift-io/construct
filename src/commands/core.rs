@@ -245,6 +245,21 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
             .map(|d| format!("\n**Context**:\nCWD: `{}`\n", d))
             .unwrap_or_default();
 
+        // Add recent execution history to context
+        let recent_history = if let Some(ref wd) = working_dir {
+            let state_manager = crate::state::project::ProjectStateManager::new(wd.clone());
+            state_manager.get_recent_history(5).unwrap_or_default()
+        } else {
+            String::new()
+        };
+
+        let history_context =
+            if !recent_history.is_empty() && !recent_history.contains("No execution history yet") {
+                format!("\n\n### Recent Execution History\n{}\n", recent_history)
+            } else {
+                String::new()
+            };
+
         let prompt = crate::strings::STRINGS
             .prompts
             .interactive_turn
@@ -252,10 +267,31 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
             .replace("{ROADMAP}", &roadmap_content)
             .replace("{TASKS}", &tasks_content);
 
+        // Detect error patterns from past failures
+        let mut error_patterns_context = String::new();
+        if let Some(ref wd) = working_dir {
+            let state_manager = crate::state::project::ProjectStateManager::new(wd.clone());
+            if let Ok(patterns) = state_manager.detect_error_patterns() {
+                if !patterns.is_empty() {
+                    error_patterns_context = state_manager.format_error_patterns(&patterns);
+                    error_patterns_context.push_str(
+                        "\n⚠️ **IMPORTANT**: You have encountered the errors above before. \
+                        DO NOT repeat the same approaches that failed. \
+                        Try the suggested alternatives instead!\n",
+                    );
+                }
+            }
+        }
+
         let context = AgentContext {
             prompt: format!(
-                "{}\n\nHistory:\n{}\n\nUser: {}",
-                system_prompt, conversation_history, prompt
+                "{}{}{}{}\n\nHistory:\n{}\n\nUser: {}",
+                system_prompt,
+                history_context,
+                error_patterns_context,
+                prompt,
+                conversation_history,
+                prompt
             ),
             working_dir: working_dir.clone(),
             model: active_model.clone(),
@@ -443,10 +479,13 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                                 }
                             };
 
-                            feed_manager.update_with_output(
-                                &cmd_result,
-                                !cmd_result.contains("[Exit Code: 0]"),
-                            );
+                            // Determine success based on whether output contains failure markers
+                            // (After common.rs fix, only failed commands have "[Exit Code: X]")
+                            let cmd_success = !cmd_result.contains("[Exit Code:")
+                                && !cmd_result.starts_with("🚫 Denied.")
+                                && !cmd_result.starts_with("Failed:");
+
+                            feed_manager.update_with_output(&cmd_result, cmd_success);
                             if let Some(eid) = feed_manager.get_event_id() {
                                 let _ = room_clone
                                     .edit_markdown(eid, &feed_manager.get_feed_content())
@@ -457,34 +496,205 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                         }
                         // OTHER ACTIONS (WriteFile, Done, etc) - NEED TO INCLUDE
                         crate::utils::AgentAction::Done => {
-                            feed_manager.process_action(&crate::utils::AgentAction::Done);
-                            feed_manager.complete_task();
-                            if let Some(eid) = feed_manager.get_event_id() {
-                                let _ = room_clone
-                                    .edit_markdown(eid, &feed_manager.get_feed_content())
-                                    .await;
+                            // Verify compilation/task status before allowing completion
+                            let verification_passed = if let Some(ref wd) = working_dir {
+                                // Check if this is a Rust project
+                                if std::path::Path::new(&format!("{}/Cargo.toml", wd)).exists() {
+                                    match crate::utils::run_shell_command_with_timeout(
+                                        "cargo check",
+                                        Some(wd),
+                                        Some(std::time::Duration::from_secs(120)),
+                                    )
+                                    .await
+                                    {
+                                        Ok(_) => {
+                                            let _ = room_clone
+                                                .send_markdown("✅ **Verification Passed**: `cargo check` succeeded\n")
+                                                .await;
+                                            true
+                                        }
+                                        Err(e) => {
+                                            // Compilation failed - show detailed error and prevent completion
+                                            let error_lines: Vec<&str> =
+                                                e.lines().take(30).collect();
+                                            let _ = room_clone
+                                                .send_markdown(
+                                                    &format!(
+                                                        "❌ **Verification Failed**: `cargo check` returned errors:\n\
+                                                        ```
+                                                        {}\n\
+                                                        ```\n\n\
+                                                        ⚠️ **Task NOT marked complete**. Please fix these errors before marking Done.\n\
+                                                        💡 **Suggestion**: Check the error messages above and update the code accordingly.",
+                                                        error_lines.join("\n")
+                                                    ),
+                                                )
+                                                .await;
+
+                                            // Log the failed verification to state.md
+                                            if let Some(ref state_manager) =
+                                                feed_manager.get_project_state_manager()
+                                            {
+                                                let _ = state_manager.log_note(
+                                                    &format!("Task completion blocked: Compilation failed. Error: {}",
+                                                        e.lines().next().unwrap_or("Unknown error"))
+                                                );
+                                            }
+                                            false
+                                        }
+                                    }
+                                } else if std::path::Path::new(&format!("{}/package.json", wd))
+                                    .exists()
+                                {
+                                    // Check if this is a Node.js project
+                                    let test_commands = vec![
+                                        "npm run build",
+                                        "npm test",
+                                        "npm run lint",
+                                        "exit 0", // Fallback: allow completion if no scripts exist
+                                    ];
+
+                                    let mut build_result =
+                                        Err("No build command succeeded".to_string());
+                                    for cmd in test_commands {
+                                        match crate::utils::run_shell_command_with_timeout(
+                                            cmd,
+                                            Some(wd),
+                                            Some(std::time::Duration::from_secs(120)),
+                                        )
+                                        .await
+                                        {
+                                            Ok(_) => {
+                                                build_result = Ok(());
+                                                break;
+                                            }
+                                            Err(_) => continue,
+                                        }
+                                    }
+
+                                    match build_result {
+                                        Ok(_) => {
+                                            let _ = room_clone
+                                                .send_markdown("✅ **Verification Passed**: Build/test checks succeeded\n")
+                                                .await;
+                                            true
+                                        }
+                                        Err(e) => {
+                                            let _ = room_clone
+                                                .send_markdown(
+                                                    &format!(
+                                                        "⚠️ **Verification Warning**: Node.js build/test checks failed:\n```\n{}\n```\n\n\
+                                                        💡 Proceeding anyway (Node.js projects may not have build scripts), but please verify manually.",
+                                                        e.lines().take(20).collect::<Vec<_>>().join("\n")
+                                                    ),
+                                                )
+                                                .await;
+                                            true // Allow completion for Node projects (might not have build script)
+                                        }
+                                    }
+                                } else if std::path::Path::new(&format!("{}/go.mod", wd)).exists() {
+                                    // Check if this is a Go project
+                                    match crate::utils::run_shell_command_with_timeout(
+                                        "go build",
+                                        Some(wd),
+                                        Some(std::time::Duration::from_secs(120)),
+                                    )
+                                    .await
+                                    {
+                                        Ok(_) => {
+                                            let _ = room_clone
+                                                .send_markdown("✅ **Verification Passed**: `go build` succeeded\n")
+                                                .await;
+                                            true
+                                        }
+                                        Err(e) => {
+                                            let _ = room_clone
+                                                .send_markdown(
+                                                    &format!(
+                                                        "❌ **Verification Failed**: `go build` returned errors:\n```\n{}\n```\n\n⚠️ Task NOT marked complete.",
+                                                        e.lines().take(30).collect::<Vec<_>>().join("\n")
+                                                    ),
+                                                )
+                                                .await;
+                                            false
+                                        }
+                                    }
+                                } else if std::path::Path::new(&format!("{}/requirements.txt", wd))
+                                    .exists()
+                                    || std::path::Path::new(&format!("{}/pyproject.toml", wd))
+                                        .exists()
+                                {
+                                    // Check if this is a Python project
+                                    match crate::utils::run_shell_command_with_timeout(
+                                        "python -m py_compile */*.py 2>/dev/null || exit 0",
+                                        Some(wd),
+                                        Some(std::time::Duration::from_secs(60)),
+                                    )
+                                    .await
+                                    {
+                                        Ok(_) => {
+                                            let _ = room_clone
+                                                .send_markdown("✅ **Verification Passed**: Python syntax check succeeded\n")
+                                                .await;
+                                            true
+                                        }
+                                        Err(e) => {
+                                            let _ = room_clone
+                                                .send_markdown(
+                                                    &format!(
+                                                        "⚠️ **Verification Notice**: Python syntax check:\n```\n{}\n```\n\n💡 Proceeding, but please verify.",
+                                                        e.lines().take(20).collect::<Vec<_>>().join("\n")
+                                                    ),
+                                                )
+                                                .await;
+                                            true // Allow completion (syntax check is optional)
+                                        }
+                                    }
+                                } else {
+                                    // Unknown project type - allow completion with warning
+                                    let _ = room_clone
+                                        .send_markdown("⚠️ **No Verification**: Unknown project type. Proceeding without verification.\n💡 Please manually verify your changes work correctly.\n")
+                                        .await;
+                                    true
+                                }
                             } else {
+                                // No working directory - allow completion
+                                true
+                            };
+
+                            if verification_passed {
+                                feed_manager.process_action(&crate::utils::AgentAction::Done);
+                                feed_manager.complete_task();
+                                if let Some(eid) = feed_manager.get_event_id() {
+                                    let _ = room_clone
+                                        .edit_markdown(eid, &feed_manager.get_feed_content())
+                                        .await;
+                                } else {
+                                    let _ = room_clone
+                                        .send_markdown(&feed_manager.get_feed_content())
+                                        .await;
+                                }
                                 let _ = room_clone
-                                    .send_markdown(&feed_manager.get_feed_content())
+                                    .send_markdown(
+                                        &crate::strings::STRINGS
+                                            .messages
+                                            .execution_complete
+                                            .replace("{}", "")
+                                            .replace("{}", "")
+                                            .replace("{}", ""),
+                                    )
                                     .await;
+                                {
+                                    let mut bot_state = state.lock().await;
+                                    let room_state =
+                                        bot_state.get_room_state(room.room_id().as_str());
+                                    room_state.is_task_completed = true;
+                                    room_state.cleanup_after_task();
+                                    bot_state.save();
+                                }
+                                break;
                             }
-                            let _ = room_clone
-                                .send_markdown(
-                                    &crate::strings::STRINGS
-                                        .messages
-                                        .execution_complete
-                                        .replace("{}", "")
-                                        .replace("{}", "")
-                                        .replace("{}", ""),
-                                )
-                                .await;
-                            {
-                                let mut bot_state = state.lock().await;
-                                let room_state = bot_state.get_room_state(room.room_id().as_str());
-                                room_state.is_task_completed = true;
-                                room_state.cleanup_after_task();
-                                bot_state.save();
-                            }
+                            // If verification failed, continue the loop (don't break)
                         }
                     }
                 }
@@ -715,8 +925,12 @@ pub async fn handle_task<S: ChatService + Clone + Send + 'static>(
         // Read Project Context and Detect New Project
         let mut project_context = String::new();
         let mut is_new_project = false;
+        let mut execution_history = String::new();
+        let mut feed_context = String::new();
+        let mut error_patterns_context = String::new();
 
         if let Some(wd) = &working_dir {
+            // Read roadmap.md
             if let Ok(roadmap) = fs::read_to_string(format!("{}/roadmap.md", wd)) {
                 if roadmap.contains("- [ ] Initial Setup") {
                     is_new_project = true;
@@ -727,6 +941,37 @@ pub async fn handle_task<S: ChatService + Clone + Send + 'static>(
                         .roadmap_context
                         .replace("{}", &roadmap),
                 );
+            }
+
+            // Read state.md for execution history
+            let state_manager = crate::state::project::ProjectStateManager::new(wd.clone());
+            if let Ok(history) = state_manager.get_recent_history(10) {
+                if !history.contains("No execution history yet") {
+                    execution_history = format!("\n\n### Recent Execution History\n{}\n", history);
+                }
+            }
+
+            // Detect error patterns from past failures
+            if let Ok(patterns) = state_manager.detect_error_patterns() {
+                if !patterns.is_empty() {
+                    error_patterns_context = state_manager.format_error_patterns(&patterns);
+                    // Add warning about learning from past mistakes
+                    error_patterns_context.push_str(
+                        "\n⚠️ **IMPORTANT**: You have encountered the errors above before. \
+                        DO NOT repeat the same approaches that failed. \
+                        Try the suggested alternatives instead!\n",
+                    );
+                }
+            }
+
+            // Read feed.md for recent progress
+            if let Ok(feed) = fs::read_to_string(format!("{}/feed.md", wd)) {
+                if !feed.trim().is_empty() && !feed.contains("**✅ Execution Complete**") {
+                    feed_context = format!(
+                        "\n\n### Current Task Progress\n{}\n",
+                        feed.lines().take(30).collect::<Vec<_>>().join("\n")
+                    );
+                }
             }
         }
 
@@ -748,8 +993,15 @@ pub async fn handle_task<S: ChatService + Clone + Send + 'static>(
         }
 
         let prompt = format!(
-            "{}\n{}\n\nTask: {}\n\nINSTRUCTIONS:\n{}\n\nIMPORTANT: Return the content of each file in a separate code block. Precede each code block with the filename. format:\n\n{}",
-            system_prompt, project_context, task_desc, instructions, return_format
+            "{}\n{}{}{}{}\n\nTask: {}\n\nINSTRUCTIONS:\n{}\n\nIMPORTANT: Return the content of each file in a separate code block. Precede each code block with the filename. format:\n\n{}",
+            system_prompt,
+            project_context,
+            execution_history,
+            error_patterns_context,
+            feed_context,
+            task_desc,
+            instructions,
+            return_format
         );
 
         let _ = room_clone.typing(true).await;

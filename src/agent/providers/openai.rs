@@ -17,12 +17,14 @@
 //!   openai:
 //!     protocol: "openai"
 //!     model: "gpt-4o"
+//!     requests_per_minute: 50  # Rate limiting (optional)
 //! ```
 
 use rig::completion::Prompt;
 use rig::providers::openai;
 
 use crate::agent::AgentContext;
+use crate::agent::rate_limiter::RateLimiter;
 use crate::config::AgentConfig;
 
 /// Default model for OpenAI provider
@@ -38,17 +40,27 @@ pub const DEFAULT_MODEL: &str = "gpt-4o";
 /// # Returns
 /// The model's response as a String, or an error message
 pub async fn execute(
-    _config: &AgentConfig,
+    config: &AgentConfig,
     context: &AgentContext,
     model_name: &str,
 ) -> Result<String, String> {
-    let client = openai::Client::from_env();
-    let agent = client.agent(model_name).build();
+    let rate_limiter = RateLimiter::from_config(config, 3);
 
-    agent
-        .prompt(&context.prompt)
+    rate_limiter
+        .execute_with_retry(
+            || async {
+                let client = openai::Client::from_env();
+                let agent = client.agent(model_name).build();
+
+                agent
+                    .prompt(&context.prompt)
+                    .await
+                    .map_err(|e| e.to_string())
+            },
+            context,
+            "openai",
+        )
         .await
-        .map_err(|e| e.to_string())
 }
 
 /// Get the default model name for OpenAI

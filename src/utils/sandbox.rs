@@ -56,8 +56,32 @@ impl Sandbox {
     /// Checks if a command binary is allowed/blocked.
     /// Handles chained commands (&&, ||, ;, |) and detects subshells.
     pub fn check_command(&self, command_line: &str, config: &CommandsConfig) -> PermissionResult {
+        // Log when check_command is called
+        crate::utils::log_interaction(
+            "SANDBOX_START",
+            "system",
+            &format!("check_command called for: {:?}", command_line),
+        );
+
         // 1. Detect potentially dangerous sub-shell execution that we can't easily parse
-        if command_line.contains("$(") || command_line.contains('`') {
+        // But ignore backticks inside heredocs (they're just text content)
+        let has_heredoc = command_line.contains("<< 'EOF")
+            || command_line.contains("<< \"EOF")
+            || command_line.contains("<< EOF");
+        let has_command_substitution = command_line.contains("$(");
+        let has_backticks = if has_heredoc {
+            // For heredocs, only check for backticks before the heredoc starts
+            if let Some(heredoc_start) = command_line.find("<<") {
+                let before_heredoc = &command_line[..heredoc_start];
+                before_heredoc.contains('`')
+            } else {
+                command_line.contains('`')
+            }
+        } else {
+            command_line.contains('`')
+        };
+
+        if has_command_substitution || has_backticks {
             return PermissionResult::Ask(format!(
                 "Complex subshell execution detected in: {}",
                 command_line
@@ -66,7 +90,19 @@ impl Sandbox {
 
         // 2. Split into individual commands respecting quotes
         let commands = self.split_shell_commands(command_line);
+
+        crate::utils::log_interaction(
+            "SANDBOX_AFTER_SPLIT",
+            "system",
+            &format!("Commands split: {:?}", commands),
+        );
+
         if commands.is_empty() {
+            crate::utils::log_interaction(
+                "SANDBOX_EMPTY",
+                "system",
+                "No commands, returning Allowed",
+            );
             return PermissionResult::Allowed;
         }
 
@@ -74,6 +110,12 @@ impl Sandbox {
 
         // 3. Check EACH command in the chain
         for cmd in commands {
+            crate::utils::log_interaction(
+                "SANDBOX_LOOP",
+                "system",
+                &format!("Checking command: {:?}", cmd),
+            );
+
             let parts: Vec<&str> = cmd.split_whitespace().collect();
             if parts.is_empty() {
                 continue;
@@ -86,25 +128,51 @@ impl Sandbox {
                 parts[0]
             };
 
+            crate::utils::log_interaction(
+                "SANDBOX_BINARY",
+                "system",
+                &format!("Binary extracted: {:?}", binary),
+            );
+
             // Check status for this specific binary
             let result = self.check_single_binary(binary, config);
 
             match result {
                 PermissionResult::Blocked(msg) => {
                     // If ANY part is blocked, the whole chain is blocked immediately
+                    crate::utils::log_interaction(
+                        "SANDBOX_RESULT",
+                        "system",
+                        &format!("Blocked: {:?}", msg),
+                    );
                     return PermissionResult::Blocked(msg);
                 }
                 PermissionResult::Ask(msg) => {
                     // If ANY part needs asking, we upgrade the final result to Ask
                     // (unless we later hit a Blocked, which we check first)
+                    crate::utils::log_interaction(
+                        "SANDBOX_RESULT",
+                        "system",
+                        &format!("Ask: {:?}", msg),
+                    );
                     final_result = PermissionResult::Ask(msg);
                 }
                 PermissionResult::Allowed => {
                     // If Allowed, continue checking others
+                    crate::utils::log_interaction(
+                        "SANDBOX_RESULT",
+                        "system",
+                        "Allowed for this binary",
+                    );
                 }
             }
         }
 
+        crate::utils::log_interaction(
+            "SANDBOX_FINAL",
+            "system",
+            &format!("Final result: {:?}", final_result),
+        );
         final_result
     }
 
@@ -117,6 +185,12 @@ impl Sandbox {
     ) -> PermissionResult {
         // First check command permissions using existing logic
         let cmd_permission = self.check_command(command_line, config);
+
+        crate::utils::log_interaction(
+            "SANDBOX_CMD_PERMISSION",
+            "system",
+            &format!("Command permission result: {:?}", cmd_permission),
+        );
 
         if matches!(cmd_permission, PermissionResult::Blocked(_)) {
             return cmd_permission;
@@ -133,6 +207,12 @@ impl Sandbox {
                 }
             }
         }
+
+        crate::utils::log_interaction(
+            "SANDBOX_FILE_OP_RESULT",
+            "system",
+            &format!("Final file operation result: {:?}", cmd_permission),
+        );
 
         cmd_permission
     }
@@ -182,8 +262,6 @@ impl Sandbox {
 
     /// Check if path stays within sandbox boundaries
     fn is_path_safe(&self, path: &str) -> bool {
-        use std::path::Path;
-
         // Skip validation for flags and options
         if path.starts_with('-') {
             return true;
@@ -199,11 +277,25 @@ impl Sandbox {
         match std::fs::canonicalize(&target) {
             Ok(canon) => canon.starts_with(&self.root_dir),
             Err(_) => {
-                // Path doesn't exist yet - check parent directory
+                // Path doesn't exist yet - check if it would be created within sandbox
+                // We allow creation of new files as long as the parent directory exists within sandbox
                 if let Some(parent) = target.parent() {
-                    std::fs::canonicalize(parent)
-                        .map(|p| p.starts_with(&self.root_dir))
-                        .unwrap_or(false)
+                    match std::fs::canonicalize(parent) {
+                        Ok(canon_parent) => canon_parent.starts_with(&self.root_dir),
+                        Err(_) => {
+                            // Parent doesn't exist either - check if relative path stays within root
+                            // For relative paths like "tasks.md", allow if it doesn't try to escape
+                            if path.starts_with("../") || path.contains("/../") {
+                                false
+                            } else if path.starts_with('/') {
+                                // Absolute path that doesn't exist
+                                false
+                            } else {
+                                // Relative path like "tasks.md" - allow creation in current directory
+                                true
+                            }
+                        }
+                    }
                 } else {
                     false
                 }
@@ -212,8 +304,21 @@ impl Sandbox {
     }
 
     fn check_single_binary(&self, binary: &str, config: &CommandsConfig) -> PermissionResult {
+        // Build a single comprehensive log entry
+        let mut log_details = Vec::new();
+        log_details.push(format!("Binary: '{}'", binary));
+        log_details.push(format!("Allowed: {:?}", config.allowed));
+        log_details.push(format!("Ask: {:?}", config.ask));
+        log_details.push(format!("Blocked: {:?}", config.blocked));
+        log_details.push(format!("Default: {}", config.default));
+
+        // Log immediately before checking
+        crate::utils::log_interaction("SANDBOX_CHECK_START", "system", &log_details.join("\n"));
+
         // 1. Check Blocked
         if config.blocked.iter().any(|b| b == binary) {
+            log_details.push(format!("Result: BLOCKED - in blocked list"));
+            crate::utils::log_interaction("SANDBOX_CHECK", "system", &log_details.join("\n"));
             return PermissionResult::Blocked(
                 crate::strings::STRINGS
                     .messages
@@ -224,11 +329,15 @@ impl Sandbox {
 
         // 2. Check Allowed
         if config.allowed.iter().any(|a| a == binary) {
+            log_details.push(format!("Result: ALLOWED - in allowed list"));
+            crate::utils::log_interaction("SANDBOX_CHECK", "system", &log_details.join("\n"));
             return PermissionResult::Allowed;
         }
 
         // 3. Check Ask
         if config.ask.iter().any(|a| a == binary) {
+            log_details.push(format!("Result: ASK - in ask list"));
+            crate::utils::log_interaction("SANDBOX_CHECK", "system", &log_details.join("\n"));
             return PermissionResult::Ask(
                 crate::strings::STRINGS
                     .messages
@@ -238,7 +347,7 @@ impl Sandbox {
         }
 
         // 4. Default Mode
-        match config.default.as_str() {
+        let result = match config.default.as_str() {
             "allow" => PermissionResult::Allowed,
             "block" => PermissionResult::Blocked(
                 crate::strings::STRINGS
@@ -252,23 +361,66 @@ impl Sandbox {
                     .command_unknown
                     .replace("{}", binary),
             ),
-        }
+        };
+        log_details.push(format!("Result: {:?} - using default", result));
+        crate::utils::log_interaction("SANDBOX_CHECK", "system", &log_details.join("\n"));
+        result
     }
 
     /// Helper to split shell chains like "cmd1 && cmd2 | cmd3" respecting quotes.
+    /// Now also handles heredocs to avoid splitting content within heredocs.
     fn split_shell_commands(&self, input: &str) -> Vec<String> {
         let mut parts = Vec::new();
         let mut current = String::new();
         let mut in_single = false;
         let mut in_double = false;
+        let mut in_heredoc = false;
+        let mut heredoc_delimiter = String::new();
         let mut chars = input.chars().peekable();
 
         while let Some(c) = chars.next() {
             match c {
-                '\'' if !in_double => in_single = !in_single,
-                '"' if !in_single => in_double = !in_double,
+                '\'' if !in_double && !in_heredoc => in_single = !in_single,
+                '"' if !in_single && !in_heredoc => in_double = !in_double,
+                '\n' => {
+                    // Check if we're starting a heredoc (only if not already in one)
+                    if !in_single && !in_double && !in_heredoc {
+                        let current_str = current.trim();
+                        // Look for heredoc pattern at end of line: << 'DELIM' or << "DELIM" or << DELIM
+                        // The pattern should be near the end, possibly followed by redirection
+                        if current_str.contains("<<") {
+                            // Extract the part after <<
+                            if let Some(heredoc_start) = current_str.split("<<").nth(1) {
+                                let delimiter = heredoc_start
+                                    .trim()
+                                    .trim_start_matches('\'')
+                                    .trim_start_matches('"')
+                                    .trim_end_matches('\'')
+                                    .trim_end_matches('"')
+                                    .split_whitespace()
+                                    .next()
+                                    .unwrap_or("");
+
+                                if !delimiter.is_empty() {
+                                    in_heredoc = true;
+                                    heredoc_delimiter = delimiter.to_string();
+                                }
+                            }
+                        }
+                    }
+                    current.push(c);
+
+                    // Check if this line ends the heredoc
+                    if in_heredoc {
+                        let line_content = current.trim();
+                        if line_content == heredoc_delimiter {
+                            in_heredoc = false;
+                            heredoc_delimiter.clear();
+                        }
+                    }
+                }
                 _ => {
-                    if !in_single && !in_double {
+                    if !in_single && !in_double && !in_heredoc {
                         // Separators: ; | &
                         // We treat '&&', '||', '|', '&', ';' as split points
                         if c == ';' {

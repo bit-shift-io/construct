@@ -47,6 +47,7 @@ agents:
   # zai:
   #   protocol: "zai"
   #   model: "glm-4.7"  # Optional, defaults to glm-4.7
+  #   requests_per_minute: 60  # Rate limiting (optional)
   #   # Requires: export ZAI_API_KEY="your-api-key"
   #
   # Available Zai Models:
@@ -57,6 +58,13 @@ agents:
   #   - glm-4.5-air  (32K tokens, lightweight)
   #   - glm-4.5-airx (32K tokens, ultra-lightweight)
   #   - glm-4.5-flash (8K tokens, fastest)
+  #
+  # Rate Limiting Recommendations:
+  #   - Start with conservative limits (10-60 RPM) to avoid hitting quotas
+  #   - If you get 429 errors, decrease requests_per_minute
+  #   - Free tiers typically have lower limits (e.g., 10-30 RPM)
+  #   - Paid tiers can handle higher limits (e.g., 100-500 RPM)
+  #   - The bot automatically retries with exponential backoff on rate limits
 
   # ==========================================================================
   # Gemini Provider (Google)
@@ -101,6 +109,7 @@ agents:
   # claude:
   #   protocol: "claude"  # or "anthropic"
   #   model: "claude-3-5-sonnet-20241022"
+  #   requests_per_minute: 50  # Rate limiting (optional)
   #   # Requires: export ANTHROPIC_API_KEY="your-api-key"
 
   # ==========================================================================
@@ -112,6 +121,7 @@ agents:
   # openai:
   #   protocol: "openai"
   #   model: "gpt-4o"
+  #   requests_per_minute: 50  # Rate limiting (optional)
   #   # Requires: export OPENAI_API_KEY="your-api-key"
 
   # ==========================================================================
@@ -123,6 +133,7 @@ agents:
   # xai:
   #   protocol: "xai"
   #   model: "grok-beta"
+  #   requests_per_minute: 50  # Rate limiting (optional)
   #   # Requires: export XAI_API_KEY="your-api-key"
 
   # ==========================================================================
@@ -134,6 +145,7 @@ agents:
   # deepai:
   #   protocol: "deepai"
   #   model: "standard"
+  #   requests_per_minute: 10  # Rate limiting (optional)
   #   # Requires: export DEEPAI_API_KEY="your-api-key"
 
 # ----------------------------------------------------------------------------

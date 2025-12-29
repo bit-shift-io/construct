@@ -4,6 +4,7 @@ use chrono::Local;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
+use tracing;
 
 /// Represents the three stages of feed evolution
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -258,7 +259,7 @@ impl FeedManager {
             let content = self.get_feed_content();
 
             if let Err(e) = fs::write(&feed_path, content) {
-                eprintln!("Failed to write feed.md: {}", e);
+                tracing::error!("Failed to write feed.md: {}", e);
             }
         }
     }

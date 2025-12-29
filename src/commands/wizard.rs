@@ -1,16 +1,23 @@
 use crate::config::AppConfig;
+use crate::features::feed::FeedManager;
 use crate::services::ChatService;
 use crate::state::{BotState, WizardMode, WizardState, WizardStep};
+use crate::utils::feed_helper;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing;
 
 pub async fn start_new_project_wizard<S: ChatService + Clone + Send + 'static>(
     state: Arc<Mutex<BotState>>,
     room: &S,
 ) {
-    {
+    let (mut feed_manager, initial_msg) = {
         let mut bot_state = state.lock().await;
         let room_state = bot_state.get_room_state(&room.room_id());
+
+        // Initialize FeedManager
+        let feed = FeedManager::new(room_state.current_project_path.clone());
+        room_state.feed_manager = Some(feed.clone());
 
         room_state.wizard = WizardState {
             active: true,
@@ -20,20 +27,44 @@ pub async fn start_new_project_wizard<S: ChatService + Clone + Send + 'static>(
             buffer: String::new(),
         };
 
+        let wizard_data = room_state.wizard.data.clone();
+
         bot_state.save();
+
+        let msg = feed_helper::format_wizard_step(
+            &WizardStep::ProjectName,
+            &WizardMode::Project,
+            "",
+            &wizard_data,
+        );
+
+        (feed, msg)
+    };
+
+    // Send initial wizard message and store event ID
+    if let Err(e) = feed_helper::start_feed(room, &mut feed_manager, &initial_msg).await {
+        tracing::error!("Failed to start feed: {}", e);
+        return;
     }
 
-    // Initial Render
-    render_step(state.clone(), room).await;
+    // Store updated feed manager with event ID
+    let mut bot_state = state.lock().await;
+    let room_state = bot_state.get_room_state(&room.room_id());
+    room_state.feed_manager = Some(feed_manager);
+    bot_state.save();
 }
 
 pub async fn start_task_wizard<S: ChatService + Clone + Send + 'static>(
     state: Arc<Mutex<BotState>>,
     room: &S,
 ) {
-    {
+    let (mut feed_manager, initial_msg) = {
         let mut bot_state = state.lock().await;
         let room_state = bot_state.get_room_state(&room.room_id());
+
+        // Initialize FeedManager
+        let feed = FeedManager::new(room_state.current_project_path.clone());
+        room_state.feed_manager = Some(feed.clone());
 
         room_state.wizard = WizardState {
             active: true,
@@ -43,10 +74,31 @@ pub async fn start_task_wizard<S: ChatService + Clone + Send + 'static>(
             buffer: String::new(),
         };
 
+        let wizard_data = room_state.wizard.data.clone();
+
         bot_state.save();
+
+        let msg = feed_helper::format_wizard_step(
+            &WizardStep::TaskDescription,
+            &WizardMode::Task,
+            "",
+            &wizard_data,
+        );
+
+        (feed, msg)
+    };
+
+    // Send initial wizard message and store event ID
+    if let Err(e) = feed_helper::start_feed(room, &mut feed_manager, &initial_msg).await {
+        tracing::error!("Failed to start feed: {}", e);
+        return;
     }
 
-    render_step(state.clone(), room).await;
+    // Store updated feed manager with event ID
+    let mut bot_state = state.lock().await;
+    let room_state = bot_state.get_room_state(&room.room_id());
+    room_state.feed_manager = Some(feed_manager);
+    bot_state.save();
 }
 
 pub async fn handle_input<S: ChatService + Clone + Send + 'static>(
@@ -60,6 +112,7 @@ pub async fn handle_input<S: ChatService + Clone + Send + 'static>(
         let mut bot_state = state.lock().await;
         let room_state = bot_state.get_room_state(&room.room_id());
         room_state.wizard = WizardState::default(); // Reset
+        room_state.feed_manager = None; // Clear feed
         bot_state.save();
         let _ = room
             .send_markdown(&crate::strings::STRINGS.wizard.cancelled)
@@ -69,37 +122,13 @@ pub async fn handle_input<S: ChatService + Clone + Send + 'static>(
 
     // Check for explicit restart
     if input == ".new" {
-        {
-            let mut bot_state = state.lock().await;
-            let room_state = bot_state.get_room_state(&room.room_id());
-            room_state.wizard = WizardState {
-                active: true,
-                mode: WizardMode::Project,
-                step: Some(WizardStep::ProjectName),
-                data: std::collections::HashMap::new(),
-                buffer: String::new(),
-            };
-            bot_state.save();
-        }
-        render_step(state.clone(), room).await;
+        start_new_project_wizard(state.clone(), room).await;
         return;
     }
 
     // Check for task restart
     if input == ".task" {
-        {
-            let mut bot_state = state.lock().await;
-            let room_state = bot_state.get_room_state(&room.room_id());
-            room_state.wizard = WizardState {
-                active: true,
-                mode: WizardMode::Task,
-                step: Some(WizardStep::TaskDescription),
-                data: std::collections::HashMap::new(),
-                buffer: String::new(),
-            };
-            bot_state.save();
-        }
-        render_step(state.clone(), room).await;
+        start_task_wizard(state.clone(), room).await;
         return;
     }
 
@@ -196,61 +225,51 @@ async fn advance_step<S: ChatService + Clone + Send + 'static>(
     render_step(state, room).await;
 }
 
-async fn render_step<S: ChatService>(state: Arc<Mutex<BotState>>, room: &S) {
-    let (step, buffer_len, mode) = {
+async fn render_step<S: ChatService + Clone + Send + 'static>(
+    state: Arc<Mutex<BotState>>,
+    room: &S,
+) {
+    let (step, mode, buffer, data, mut feed_manager) = {
         let mut bot_state = state.lock().await;
         let room_state = bot_state.get_room_state(&room.room_id());
+
+        let feed = match &room_state.feed_manager {
+            Some(f) => f.clone(),
+            None => {
+                // Create new feed manager if none exists
+                let new_feed = FeedManager::new(room_state.current_project_path.clone());
+                room_state.feed_manager = Some(new_feed.clone());
+                new_feed
+            }
+        };
+
         (
             room_state.wizard.step.clone(),
-            room_state.wizard.buffer.len(),
             room_state.wizard.mode.clone(),
+            room_state.wizard.buffer.clone(),
+            room_state.wizard.data.clone(),
+            feed,
         )
     };
 
-    let msg = match step {
-        Some(WizardStep::ProjectName) => crate::strings::STRINGS.wizard.project_name.to_string(),
-        Some(WizardStep::ProjectType) => crate::strings::STRINGS.wizard.project_type.to_string(),
-        Some(WizardStep::Stack) => crate::strings::STRINGS.wizard.stack.to_string(),
-        Some(WizardStep::Description) => {
-            if buffer_len == 0 {
-                // Modified prompt to include tech stack info
-                "**📝 Project Description**\n\nDescribe your project. **Please include the programming language and tech stack you want to use.**\n\nType `.ok` to finish and create the project.".to_string()
-            } else {
-                return;
-            }
-        }
-        Some(WizardStep::TaskDescription) => {
-            if buffer_len == 0 {
-                crate::strings::STRINGS.wizard.task_description.to_string()
-            } else {
-                return;
-            }
-        }
-        Some(WizardStep::Confirmation) => {
-            let mut bot_state = state.lock().await;
-            let room_state = bot_state.get_room_state(&room.room_id());
-            let d = &room_state.wizard.data;
-            let desc = &room_state.wizard.buffer;
+    let msg = feed_helper::format_wizard_step(
+        &step.unwrap_or(WizardStep::ProjectName),
+        &mode,
+        &buffer,
+        &data,
+    );
 
-            if mode == WizardMode::Task {
-                format!(
-                    "**✅ Confirm Task**\n\n**Requirements**:\n{}\n\nType `.ok` to start task.",
-                    desc
-                )
-            } else {
-                format!(
-                    "**✅ Review Project**\n\n**Name**: {}\n**Type**: {}\n**Stack**: {}\n**Description**: {} chars\n\nType `.ok` to generate plan.",
-                    d.get("name").unwrap_or(&"?".to_string()),
-                    d.get("type").unwrap_or(&"?".to_string()),
-                    d.get("stack").unwrap_or(&"?".to_string()),
-                    desc.len()
-                )
-            }
-        }
-        None => return,
-    };
+    // Update feed message (edit existing or send new)
+    if let Err(e) = feed_helper::update_feed_message(room, &mut feed_manager, &msg).await {
+        tracing::error!("Failed to update feed message: {}", e);
+        return;
+    }
 
-    let _ = room.send_markdown(&msg).await;
+    // Save updated feed manager with event ID
+    let mut bot_state = state.lock().await;
+    let room_state = bot_state.get_room_state(&room.room_id());
+    room_state.feed_manager = Some(feed_manager);
+    bot_state.save();
 }
 
 async fn finish_wizard<S: ChatService + Clone + Send + 'static>(

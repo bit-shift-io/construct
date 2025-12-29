@@ -21,12 +21,14 @@
 //!   zai:
 //!     protocol: "zai"
 //!     model: "glm-4.7"
+//!     requests_per_minute: 60  # Rate limiting (optional)
 //! ```
 
 use rig::completion::Prompt;
 use rig::providers::zai;
 
 use crate::agent::AgentContext;
+use crate::agent::rate_limiter::RateLimiter;
 use crate::config::AgentConfig;
 
 /// Default model for Zai provider
@@ -46,13 +48,23 @@ pub async fn execute(
     context: &AgentContext,
     model_name: &str,
 ) -> Result<String, String> {
-    let client = zai::Client::from_env();
-    let agent = client.agent(model_name).build();
+    let rate_limiter = RateLimiter::from_config(config, 3);
 
-    agent
-        .prompt(&context.prompt)
+    rate_limiter
+        .execute_with_retry(
+            || async {
+                let client = zai::Client::from_env();
+                let agent = client.agent(model_name).build();
+
+                agent
+                    .prompt(&context.prompt)
+                    .await
+                    .map_err(|e| e.to_string())
+            },
+            context,
+            "zai",
+        )
         .await
-        .map_err(|e| e.to_string())
 }
 
 /// Get the default model name for Zai

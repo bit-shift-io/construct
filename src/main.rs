@@ -28,6 +28,8 @@ use matrix_sdk::{
 use std::fs;
 use std::sync::{Arc, OnceLock};
 use tokio::sync::Mutex;
+use tracing;
+use tracing_subscriber;
 
 use crate::bridge::BridgeManager;
 use crate::config::AppConfig;
@@ -42,12 +44,41 @@ static BRIDGE_MANAGER: OnceLock<Arc<BridgeManager>> = OnceLock::new();
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize tracing subscriber for logging
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                tracing_subscriber::EnvFilter::new("info")
+                    // Filter out verbose Matrix SDK logs
+                    .add_directive("matrix_sdk=warn".parse().unwrap())
+                    .add_directive("hyper=warn".parse().unwrap())
+                    // Filter out sync callback spam
+                    .add_directive("sync_with_callback=off".parse().unwrap())
+                    // Filter out backup warnings
+                    .add_directive("backup=off".parse().unwrap())
+                    // Keep important Matrix connection logs
+                    .add_directive("matrix_sdk::client=info".parse().unwrap())
+            }),
+        )
+        .with_target(false)
+        .with_level(true)
+        .init();
+
     // 1. Initial configuration loading
     let config_content =
         fs::read_to_string("data/config.yaml").context("Failed to read data/config.yaml")?;
 
     let config: AppConfig =
         serde_yaml::from_str(&config_content).context("Failed to parse YAML")?;
+
+    // Clear agent.log on startup for fresh debugging session
+    let _ = fs::write(
+        "data/agent.log",
+        format!(
+            "--- [{}] Agent session started ---\n\n",
+            chrono::Local::now().to_rfc3339()
+        ),
+    );
 
     // 2. Initialize global state and manager
     let state = Arc::new(Mutex::new(BotState::load()));
@@ -56,7 +87,7 @@ async fn main() -> Result<()> {
     CONFIG.set(config.clone()).ok();
     BRIDGE_MANAGER.set(bridge_manager).ok();
 
-    println!(
+    tracing::info!(
         "{}",
         crate::strings::STRINGS
             .logs
@@ -80,11 +111,11 @@ async fn main() -> Result<()> {
         .send()
         .await?;
 
-    println!("{}", crate::strings::STRINGS.logs.login_success);
+    tracing::info!("{}", crate::strings::STRINGS.logs.login_success);
 
     // 5. Update Display Name if configured
     if let Some(display_name) = &config.services.matrix.display_name {
-        println!(
+        tracing::info!(
             "{}",
             crate::strings::STRINGS
                 .logs
@@ -92,7 +123,7 @@ async fn main() -> Result<()> {
                 .replace("{}", display_name)
         );
         if let Err(e) = client.account().set_display_name(Some(display_name)).await {
-            eprintln!(
+            tracing::error!(
                 "{}",
                 crate::strings::STRINGS
                     .logs
@@ -146,9 +177,9 @@ async fn main() -> Result<()> {
     // 6. Start Sync Loop
     let sync_client = client.clone();
     let sync_handle = tokio::spawn(async move {
-        println!("{}", crate::strings::STRINGS.logs.sync_loop_start);
+        tracing::info!("{}", crate::strings::STRINGS.logs.sync_loop_start);
         if let Err(e) = sync_client.sync(SyncSettings::default()).await {
-            eprintln!(
+            tracing::error!(
                 "{}",
                 crate::strings::STRINGS
                     .logs
@@ -163,8 +194,8 @@ async fn main() -> Result<()> {
 
     // 8. Graceful Shutdown
     match tokio::signal::ctrl_c().await {
-        Ok(()) => println!("{}", crate::strings::STRINGS.logs.shutdown),
-        Err(err) => eprintln!(
+        Ok(()) => tracing::info!("{}", crate::strings::STRINGS.logs.shutdown),
+        Err(err) => tracing::error!(
             "{}",
             crate::strings::STRINGS
                 .logs
@@ -183,7 +214,7 @@ async fn setup_bridges(client: &Client, config: &AppConfig, state: Arc<Mutex<Bot
         for entry in entries {
             if entry.service.as_deref() == Some("matrix") {
                 if let Some(room_id_str) = &entry.channel {
-                    println!(
+                    tracing::info!(
                         "{}",
                         crate::strings::STRINGS
                             .logs
@@ -194,7 +225,7 @@ async fn setup_bridges(client: &Client, config: &AppConfig, state: Arc<Mutex<Bot
 
                     if let Ok(room_id) = RoomId::parse(room_id_str) {
                         if let Err(e) = client.join_room_by_id(&room_id).await {
-                            eprintln!(
+                            tracing::error!(
                                 "{}",
                                 crate::strings::STRINGS
                                     .logs
@@ -203,7 +234,7 @@ async fn setup_bridges(client: &Client, config: &AppConfig, state: Arc<Mutex<Bot
                                     .replace("{}", &e.to_string())
                             );
                         } else if let Some(room) = client.get_room(&room_id) {
-                            println!(
+                            tracing::info!(
                                 "{}",
                                 crate::strings::STRINGS
                                     .logs
@@ -225,7 +256,7 @@ async fn setup_bridges(client: &Client, config: &AppConfig, state: Arc<Mutex<Bot
 /// Handles incoming room invitations.
 async fn handle_invites(event: StrippedRoomMemberEvent, room: Room) {
     if event.content.membership == MembershipState::Invite {
-        println!(
+        tracing::info!(
             "{}",
             crate::strings::STRINGS
                 .logs
@@ -233,7 +264,7 @@ async fn handle_invites(event: StrippedRoomMemberEvent, room: Room) {
                 .replace("{}", &format!("{:?}", room.room_id()))
         );
         if let Err(e) = room.join().await {
-            eprintln!(
+            tracing::error!(
                 "{}",
                 crate::strings::STRINGS
                     .logs
@@ -241,7 +272,7 @@ async fn handle_invites(event: StrippedRoomMemberEvent, room: Room) {
                     .replace("{}", &e.to_string())
             );
         } else {
-            println!("{}", crate::strings::STRINGS.logs.join_invite_success);
+            tracing::info!("{}", crate::strings::STRINGS.logs.join_invite_success);
         }
     }
 }

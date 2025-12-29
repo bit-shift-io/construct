@@ -1,11 +1,11 @@
 pub mod project;
 
+use crate::features::feed::FeedManager;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
 use tokio::sync::watch;
-use crate::features::feed::FeedManager;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum WizardStep {
@@ -82,6 +82,7 @@ impl RoomState {
         self.command_retry_count = 0;
         self.is_task_completed = false;
         self.feed_event_id = None;
+        self.input_tx = None;
     }
 }
 
@@ -117,4 +118,3 @@ impl BotState {
         }
     }
 }
-
