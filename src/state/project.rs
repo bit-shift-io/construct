@@ -88,6 +88,29 @@ impl ProjectStateManager {
         self.append_entry(&entry)
     }
 
+    /// Logs a conversation exchange between user and agent.
+    pub fn log_conversation(&self, user_msg: &str, agent_response: &str) -> Result<(), String> {
+        let entry = format!(
+            "- **User**: {}\n- **Agent**: {}\n",
+            user_msg,
+            agent_response.chars().take(500).collect::<String>() // Limit response length
+        );
+        let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+        let full_entry = format!("\n## [{}]\n**Conversation**:\n{}\n", timestamp, entry);
+        let mut existing_content = if Path::new(&self.state_file_path()).exists() {
+            fs::read_to_string(&self.state_file_path()).unwrap_or_default()
+        } else {
+            String::from(
+                "# Project State\n\nThis file tracks the execution history and context for this project.\n",
+            )
+        };
+
+        existing_content.push_str(&full_entry);
+
+        fs::write(&self.state_file_path(), existing_content)
+            .map_err(|e| format!("Failed to write state.md: {}", e))
+    }
+
     /// Reads the entire state.md content.
     pub fn read(&self) -> Result<String, String> {
         let state_path = self.state_file_path();
@@ -123,6 +146,56 @@ impl ProjectStateManager {
             "# Project State\n\nThis file tracks the execution history and context for this project.\n",
         )
         .map_err(|e| format!("Failed to clear state.md: {}", e))
+    }
+
+    /// Gets recent conversations from state.md formatted for agent context.
+    /// Returns the last N conversation exchanges (user question + agent response).
+    pub fn get_recent_conversations(&self, count: usize) -> Result<String, String> {
+        let content = self.read()?;
+        if content.is_empty() {
+            return Ok("No conversation history yet.".to_string());
+        }
+
+        // Parse conversation entries (they start with "## Conversation")
+        let mut conversations = Vec::new();
+        let lines: Vec<&str> = content.lines().collect();
+
+        let mut i = 0;
+        while i < lines.len() {
+            if lines[i].starts_with("## [") && lines[i].contains("**Conversation**") {
+                // Found a conversation entry
+                let mut conv_text = String::new();
+                i += 1; // Move past the header
+
+                // Extract all lines until next "##" or end of file
+                while i < lines.len() {
+                    if lines[i].starts_with("## [") {
+                        break;
+                    }
+                    conv_text.push_str(lines[i]);
+                    conv_text.push('\n');
+                    i += 1;
+                }
+
+                conversations.push(conv_text.trim().to_string());
+            } else {
+                i += 1;
+            }
+        }
+
+        // Take the last N entries (most recent first)
+        let recent: Vec<_> = conversations.into_iter().rev().take(count).collect();
+        let recent: Vec<_> = recent.into_iter().rev().collect();
+
+        if recent.is_empty() {
+            Ok("No conversation history yet.".to_string())
+        } else {
+            Ok(format!(
+                "### Recent Conversations (last {} exchanges)\n{}\n",
+                count,
+                recent.join("\n\n")
+            ))
+        }
     }
 
     /// Gets recent execution history as a formatted summary for the agent.
@@ -392,7 +465,7 @@ Try:
                     pattern_name: "Disk Full".to_string(),
                     suggestion: "Your disk is out of space.
 Try:
-1. Cleaning build artifacts: cargo clean, npm cache clean, etc.
+1. Cleaning build artifacts
 2. Removing temporary files
 3. Cleaning package caches
 4. Freeing up disk space"
@@ -403,6 +476,83 @@ Try:
                         "df -h to check disk space".to_string(),
                     ],
                     confidence: 0.95,
+                });
+            }
+
+            // Flutter/Dart-specific patterns
+            if output.contains("depends on") && output.contains("any which doesn't exist") {
+                if let Some(start) = output.find("depends on") {
+                    let after_dep = &output[start..];
+                    if let Some(package_end) = after_dep.find(" any which") {
+                        let package_name = after_dep[11..package_end].trim();
+                        patterns.push(ErrorPattern {
+                            error_type: "flutter_missing_package".to_string(),
+                            pattern_name: "Flutter Package Not Found".to_string(),
+                            suggestion: format!(
+                                "The Flutter package '{}' doesn't exist on pub.dev.
+Try:
+1. Check the correct package name on https://pub.dev
+2. Common chart packages: 'fl_chart', 'charts_flutter', 'syncfusion_flutter_charts'
+3. Search with: flutter pub search <keyword>
+4. Check for typos in the package name",
+                                package_name
+                            ),
+                            alternative_commands: vec![
+                                format!(
+                                    "flutter pub search {}",
+                                    package_name.split('_').last().unwrap_or("chart")
+                                ),
+                                "flutter pub search chart".to_string(),
+                                "Visit https://pub.dev to search manually".to_string(),
+                            ],
+                            confidence: 0.95,
+                        });
+                    }
+                }
+            }
+
+            if output.contains("Target dart2js failed") || output.contains("Compilation failed") {
+                patterns.push(ErrorPattern {
+                    error_type: "flutter_web_compilation_error".to_string(),
+                    pattern_name: "Flutter Web Compilation Failed".to_string(),
+                    suggestion: "Flutter web build failed.
+Common causes:
+1. FFI (dart:ffi) is not available for web/Wasm builds
+2. Platform-specific code not compatible with web
+3. Missing web-specific dependencies
+Try:
+1. Remove or conditionalize FFI usage for web
+2. Use platform checks: kIsWeb
+3. Check if packages support web platform
+4. Try building for desktop/mobile instead"
+                        .to_string(),
+                    alternative_commands: vec![
+                        "flutter build macos/windows/linux".to_string(),
+                        "Add conditional imports: import 'dart:io' if (dart:io.Platform.isAndroid)"
+                            .to_string(),
+                        "Check package compatibility: flutter pub publish --dry-run".to_string(),
+                    ],
+                    confidence: 0.9,
+                });
+            }
+
+            if output.contains("Test failed") || output.contains("Some tests failed") {
+                patterns.push(ErrorPattern {
+                    error_type: "flutter_test_failure".to_string(),
+                    pattern_name: "Flutter Tests Failed".to_string(),
+                    suggestion: "Flutter tests are failing.
+Try:
+1. Run tests with verbose output: flutter test --verbose
+2. Check individual test: flutter test test/name_test.dart
+3. Review test logs for specific failures
+4. Update test expectations if code changed legitimately"
+                        .to_string(),
+                    alternative_commands: vec![
+                        "flutter test --verbose".to_string(),
+                        "flutter test --reporter expanded".to_string(),
+                        "flutter test test/name_test.dart".to_string(),
+                    ],
+                    confidence: 0.85,
                 });
             }
         }
@@ -446,7 +596,10 @@ Try:
             output.push('\n');
         }
 
-        output.push_str("💡 **Recommendation**: Learn from these patterns and try the suggested alternatives!\n");
+        output
+            .push_str("\n⚠️ **CRITICAL INSTRUCTION**: You MUST follow the error patterns above!\n");
+        output.push_str("🚫 DO NOT retry commands that have failed multiple times.\n");
+        output.push_str("✅ ALWAYS try the suggested alternative commands first.\n");
         output
     }
 }

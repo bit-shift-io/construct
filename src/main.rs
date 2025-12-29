@@ -6,6 +6,7 @@ mod commands;
 mod config;
 
 mod features;
+mod patterns;
 mod services;
 mod state;
 mod utils;

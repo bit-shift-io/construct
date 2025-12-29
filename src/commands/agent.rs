@@ -4,6 +4,7 @@ use crate::config::AppConfig;
 use crate::services::ChatService;
 use crate::services::message_helper::MessageHelper;
 use crate::state::BotState;
+use std::fs;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -334,7 +335,7 @@ pub async fn handle_ask<S: ChatService + Clone + Send + 'static>(
     let room_state = bot_state.get_room_state(&room.room_id());
 
     let working_dir = room_state.current_project_path.clone();
-    let prompt = argument.to_string();
+    let user_question = argument.to_string();
     let room_clone = room.clone();
     let config_clone = config.clone();
 
@@ -352,6 +353,72 @@ pub async fn handle_ask<S: ChatService + Clone + Send + 'static>(
 
         let helper = MessageHelper::new(room_clone.room_id());
         let state_clone = state.clone();
+
+        // Build enhanced prompt with project context
+        let system_prompt = crate::strings::STRINGS.prompts.system;
+
+        let mut project_context = String::new();
+        let mut execution_history = String::new();
+        let mut conversation_context = String::new();
+        let mut error_patterns_context = String::new();
+        let mut feed_context = String::new();
+
+        if let Some(ref wd) = working_dir {
+            // Read roadmap.md
+            if let Ok(roadmap) = fs::read_to_string(format!("{}/roadmap.md", wd)) {
+                project_context = format!("\n\n### Project Roadmap\n{}\n", roadmap);
+            }
+
+            // Read tasks.md
+            if let Ok(tasks) = fs::read_to_string(format!("{}/tasks.md", wd)) {
+                project_context = format!("{}\n\n### Current Tasks\n{}\n", project_context, tasks);
+            }
+
+            // Read state.md for execution history AND conversations
+            let state_manager = crate::state::project::ProjectStateManager::new(wd.clone());
+            if let Ok(history) = state_manager.get_recent_history(5) {
+                if !history.contains("No execution history yet") {
+                    execution_history = format!("\n\n### Recent Execution History\n{}\n", history);
+                }
+            }
+
+            // Get recent conversations
+            if let Ok(conversations) = state_manager.get_recent_conversations(10) {
+                if !conversations.contains("No conversation history yet") {
+                    conversation_context =
+                        format!("\n\n### Recent Conversations\n{}\n", conversations);
+                }
+            }
+
+            // Detect error patterns from past failures
+            if let Ok(patterns) = state_manager.detect_error_patterns() {
+                if !patterns.is_empty() {
+                    error_patterns_context = state_manager.format_error_patterns(&patterns);
+                }
+            }
+
+            // Read feed.md for recent progress
+            if let Ok(feed) = fs::read_to_string(format!("{}/feed.md", wd)) {
+                if !feed.trim().is_empty() && !feed.contains("**✅ Execution Complete**") {
+                    feed_context = format!(
+                        "\n\n### Current Task Progress\n{}\n",
+                        feed.lines().take(20).collect::<Vec<_>>().join("\n")
+                    );
+                }
+            }
+        }
+
+        // Build enhanced prompt with all context including conversations
+        let prompt = format!(
+            "{}{}{}{}{}{}\n\n### User Question\n{}\n\nPlease answer based on the project context and conversation history above.",
+            system_prompt,
+            project_context,
+            execution_history,
+            conversation_context,
+            error_patterns_context,
+            feed_context,
+            user_question
+        );
 
         let callback_room = room_clone.clone();
         let callback_helper = helper.clone();
@@ -389,6 +456,12 @@ pub async fn handle_ask<S: ChatService + Clone + Send + 'static>(
             Ok(s) => s,
             Err(s) => format!("Error: {}", s),
         };
+
+        // Log conversation to state.md for future context
+        if let Some(ref wd) = working_dir {
+            let state_manager = crate::state::project::ProjectStateManager::new(wd.clone());
+            let _ = state_manager.log_conversation(&user_question, &final_content);
+        }
 
         // Send final response as a new message
         let mut st = state_clone.lock().await;
