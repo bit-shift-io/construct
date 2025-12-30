@@ -1,4 +1,4 @@
-use crate::agent::{AgentContext, discovery};
+use crate::agent::{AgentContext, providers};
 use crate::commands::core::execute_with_fallback;
 use crate::config::AppConfig;
 use crate::services::ChatService;
@@ -206,50 +206,25 @@ pub async fn handle_models(
         return;
     };
 
-    // Now fetch models (Network call - slow)
-    // We already have logic for this in the old handle_agents.
-    // It's specific to provider type.
-
-    let model_list =
-        if cfg.protocol == "openai" || cfg.protocol == "groq" || cfg.protocol == "gemini" {
-            if cfg.protocol == "gemini" {
-                match discovery::list_gemini_models(config).await {
-                    Ok(models) => models,
-                    Err(e) => {
-                        response.push_str(&format!("⚠️ Failed to fetch models: {}\n", e));
-                        Vec::new()
-                    }
-                }
-            } else if cfg.protocol == "groq" {
-                match discovery::list_groq_models(config).await {
-                    Ok(models) => models,
-                    Err(e) => {
-                        response.push_str(&format!("⚠️ Failed to fetch models: {}\n", e));
-                        Vec::new()
-                    }
-                }
-            } else {
-                Vec::new()
-            }
-        } else if cfg.protocol == "anthropic" || cfg.protocol == "claude" {
-            match discovery::list_anthropic_models(config).await {
-                Ok(models) => models,
-                Err(e) => {
-                    response.push_str(&format!("⚠️ Failed to fetch models: {}\n", e));
-                    Vec::new()
-                }
-            }
-        } else if cfg.protocol == "zai" {
-            match discovery::list_zai_models(config).await {
-                Ok(models) => models,
-                Err(e) => {
-                    response.push_str(&format!("⚠️ Failed to fetch models: {}\n", e));
-                    Vec::new()
-                }
-            }
-        } else {
+    // Now fetch models using unified provider interface
+    let mut model_list = match providers::list_models(&cfg.protocol, cfg).await {
+        Ok(models) => models,
+        Err(e) => {
+            // Log error but don't show full traceback to user unless verbose?
+            // User sees fallbacks anyway.
+            // response.push_str(&format!("⚠️ Discovery failed: {}\n", e));
             Vec::new()
-        };
+        }
+    };
+
+    // Append configured fallbacks if not already present
+    if let Some(fallbacks) = &cfg.model_fallbacks {
+        for fallback in fallbacks {
+            if !model_list.contains(fallback) {
+                model_list.push(fallback.clone());
+            }
+        }
+    }
 
     // Save to state for index selection
     {

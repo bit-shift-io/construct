@@ -18,6 +18,8 @@
 //!     requests_per_minute: 50  # Rate limiting (optional)
 //! ```
 
+use rig::client::CompletionClient;
+use rig::client::ProviderClient;
 use rig::completion::Prompt;
 use rig::providers::openai;
 

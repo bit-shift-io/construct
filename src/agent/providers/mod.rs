@@ -81,3 +81,23 @@ pub fn is_provider_configured(protocol: &str) -> bool {
         _ => false,
     }
 }
+
+/// List available models for a given provider protocol
+pub async fn list_models(protocol: &str, config: &AgentConfig) -> Result<Vec<String>, String> {
+    match protocol {
+        "zai" => zai::list_models(config).await,
+        "gemini" => gemini::list_models(config).await,
+        "claude" | "anthropic" => anthropic::list_models(config).await,
+        "openai" => openai::list_models(config).await,
+        "groq" => groq::list_models(config).await,
+        // xai, deepai, etc. might not support discovery yet or follow different patterns
+        // For now, return empty or implement if possible.
+        // deepai doesn't seem to have list_models.
+        // xai uses openai protocol but might not have listing endpoint in xai.rs yet?
+        // Let's check xai.rs content if needed. Assuming no for now to be safe.
+        _ => Err(format!(
+            "Model discovery not supported for provider: {}",
+            protocol
+        )),
+    }
+}

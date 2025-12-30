@@ -101,6 +101,8 @@ pub struct AgentConfig {
     #[serde(default)]
     pub model: String, // Required for Rig
     #[serde(default)]
+    pub endpoint: Option<String>,
+    #[serde(default)]
     pub api_key: Option<String>,
     #[serde(default)]
     pub api_key_env: Option<String>, // e.g. "GEMINI_API_KEY"

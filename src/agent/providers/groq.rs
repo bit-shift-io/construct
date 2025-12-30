@@ -20,8 +20,12 @@
 //!     requests_per_minute: 30
 //! ```
 
+use rig::client::CompletionClient;
+use rig::client::ProviderClient;
 use rig::completion::Prompt;
 use rig::providers::openai;
+use serde::Deserialize;
+use std::time::Duration;
 
 use crate::agent::AgentContext;
 use crate::agent::rate_limiter::RateLimiter;
@@ -29,6 +33,55 @@ use crate::config::AgentConfig;
 
 /// Default model for Groq provider
 pub const DEFAULT_MODEL: &str = "llama-3.3-70b-versatile";
+
+#[derive(Debug, Deserialize)]
+struct OpenAIModel {
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIListResponse {
+    data: Vec<OpenAIModel>,
+}
+
+/// List available models from the Groq API
+pub async fn list_models(config: &AgentConfig) -> Result<Vec<String>, String> {
+    let api_key = if let Some(k) = &config.api_key {
+        k.clone()
+    } else if let Some(env_var) = &config.api_key_env {
+        std::env::var(env_var).map_err(|_| {
+            crate::strings::STRINGS
+                .messages
+                .missing_env_var
+                .replace("{}", env_var)
+        })?
+    } else {
+        std::env::var("GROQ_API_KEY").map_err(|_| "Missing GROQ_API_KEY")?
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let resp = client
+        .get("https://api.groq.com/openai/v1/models")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .send()
+        .await
+        .map_err(|_e| "Failed to fetch Groq models".to_string())?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Groq API Error: {}", resp.status()));
+    }
+
+    let body: OpenAIListResponse = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Groq response: {}", e))?;
+
+    Ok(body.data.into_iter().map(|m| m.id).collect())
+}
 
 /// Execute a prompt using the Groq provider
 ///

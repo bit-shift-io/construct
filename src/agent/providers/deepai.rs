@@ -53,42 +53,46 @@ pub async fn execute(
 
     rate_limiter
         .execute_with_retry(
-            move || async {
-                let api_key = if let Some(key) = &config_clone.api_key {
-                    key.clone()
-                } else {
-                    std::env::var("DEEPAI_API_KEY").map_err(|_| "Missing DEEPAI_API_KEY")?
-                };
+            move || {
+                let config = config_clone.clone();
+                let prompt = prompt_clone.clone();
+                async move {
+                    let api_key = if let Some(key) = &config.api_key {
+                        key.clone()
+                    } else {
+                        std::env::var("DEEPAI_API_KEY").map_err(|_| "Missing DEEPAI_API_KEY")?
+                    };
 
-                let client = reqwest::Client::new();
-                let resp = client
-                    .post("https://api.deepai.org/api/text-generator")
-                    .header("api-key", api_key)
-                    .form(&[("text", &prompt_clone)])
-                    .send()
-                    .await
-                    .map_err(|e| {
+                    let client = reqwest::Client::new();
+                    let resp = client
+                        .post("https://api.deepai.org/api/text-generator")
+                        .header("api-key", api_key)
+                        .form(&[("text", &prompt)])
+                        .send()
+                        .await
+                        .map_err(|e| {
+                            crate::strings::STRINGS
+                                .messages
+                                .deepai_request_failed
+                                .replace("{}", &e.to_string())
+                        })?;
+
+                    if !resp.status().is_success() {
+                        return Err(crate::strings::STRINGS
+                            .messages
+                            .deepai_api_error
+                            .replace("{}", &resp.status().to_string()));
+                    }
+
+                    let body: DeepAIResponse = resp.json().await.map_err(|e| {
                         crate::strings::STRINGS
                             .messages
-                            .deepai_request_failed
+                            .deepai_parse_error
                             .replace("{}", &e.to_string())
                     })?;
 
-                if !resp.status().is_success() {
-                    return Err(crate::strings::STRINGS
-                        .messages
-                        .deepai_api_error
-                        .replace("{}", &resp.status().to_string()));
+                    Ok(body.output)
                 }
-
-                let body: DeepAIResponse = resp.json().await.map_err(|e| {
-                    crate::strings::STRINGS
-                        .messages
-                        .deepai_parse_error
-                        .replace("{}", &e.to_string())
-                })?;
-
-                Ok(body.output)
             },
             context,
             "deepai",

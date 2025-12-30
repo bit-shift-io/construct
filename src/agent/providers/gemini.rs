@@ -31,13 +31,80 @@
 
 use regex::Regex;
 use rig::completion::Prompt;
+use serde::Deserialize;
+use std::time::Duration;
 
 use crate::agent::AgentContext;
-use crate::agent::discovery;
 use crate::config::AgentConfig;
 
 /// Default model for Gemini provider
 pub const DEFAULT_MODEL: &str = "gemini-1.5-pro";
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct GeminiModel {
+    name: String,
+    #[serde(rename = "displayName")]
+    #[allow(dead_code)]
+    display_name: Option<String>,
+    #[serde(rename = "supportedGenerationMethods")]
+    supported_generation_methods: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GeminiListResponse {
+    models: Option<Vec<GeminiModel>>,
+}
+
+/// List available models from the Gemini API
+pub async fn list_models(config: &AgentConfig) -> Result<Vec<String>, String> {
+    let api_key = if let Some(key) = &config.api_key {
+        key.clone()
+    } else {
+        std::env::var("GEMINI_API_KEY").map_err(|_| "Missing GEMINI_API_KEY")?
+    };
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let url = format!(
+        "https://generativelanguage.googleapis.com/v1beta/models?key={}",
+        api_key
+    );
+
+    let resp = client.get(&url).send().await.map_err(|e| {
+        crate::strings::STRINGS
+            .messages
+            .gemini_fetch_failed
+            .replace("{}", &e.to_string())
+    })?;
+
+    if !resp.status().is_success() {
+        return Err(crate::strings::STRINGS
+            .messages
+            .gemini_api_error
+            .replace("{}", &resp.status().to_string()));
+    }
+
+    let body: GeminiListResponse = resp.json().await.map_err(|e| {
+        crate::strings::STRINGS
+            .messages
+            .gemini_parse_error
+            .replace("{}", &e.to_string())
+    })?;
+
+    // Use all models returned by API, trusting user/API filtering
+    let models = body
+        .models
+        .unwrap_or_default()
+        .into_iter()
+        .map(|m| m.name.replace("models/", ""))
+        .collect();
+
+    Ok(models)
+}
 
 /// Execute a prompt using the Gemini provider with full model discovery and fallback support
 ///
@@ -59,15 +126,15 @@ pub async fn execute(
         std::env::var("GEMINI_API_KEY").map_err(|_| "Missing GEMINI_API_KEY")?
     };
 
-    let mut models_to_try = Vec::new();
+    let mut models_to_try: Vec<String> = Vec::new();
 
     // Priority 1: User Override
     if !model_name.is_empty() && model_name != "default" {
-        models_to_try.push(model_name.clone());
+        models_to_try.push(model_name.to_string());
     }
 
     // Priority 2: Discovered API Models (Sorted by Regex)
-    if let Ok(available_models) = discovery::list_gemini_models_web(&api_key).await {
+    if let Ok(available_models) = list_models(config).await {
         if let Some(order_patterns) = &config.model_order {
             let mut remaining = available_models.clone();
             for pattern in order_patterns {

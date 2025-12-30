@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 
 mod adapter;
-pub mod discovery;
 mod factory;
+pub mod providers;
 mod rate_limiter;
 
 pub use self::adapter::UnifiedAgent;

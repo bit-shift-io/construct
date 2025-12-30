@@ -39,32 +39,28 @@ agents:
   # ==========================================================================
   # ZAI Provider (GLM Models - Recommended)
   # ==========================================================================
-  # Zai provides access to General Language Models through an Anthropic-compatible API.
-  # Models: glm-4.7 (flagship), glm-4.6 (200K context), glm-4.5 series
-  # API Key: Set ZAI_API_KEY environment variable
-  # Documentation: https://github.com/Gibbz/rig/tree/feature/zai-provider
+  # Zai provides access to General Language Models through an OpenAI-compatible API.
   #
-  # zai:
-  #   protocol: "zai"
-  #   model: "glm-4.7"  # Optional, defaults to glm-4.7
-  #   requests_per_minute: 60  # Rate limiting (optional)
-  #   # Requires: export ZAI_API_KEY="your-api-key"
+  # IMPORTANT: Zai has separate endpoints for General vs Coding tasks.
+  #
+  # 1. General Endpoint (Chat, Q&A):
+  #    endpoint: "https://api.z.ai/api/paas/v4/"
+  #
+  # 2. Coding Endpoint (Code Generation, Refactoring):
+  #    endpoint: "https://api.z.ai/api/coding/paas/v4/"
+  #
+  # zai_coding:
+  #   protocol: "openai"
+  #   model: "glm-4.7"
+  #   endpoint: "https://api.z.ai/api/coding/paas/v4/"
+  #   requests_per_minute: 60
+  #   # Requires: export ZAI_API_KEY="your-api-key" (or set api_key here)
+  #   # Note: Set environment variable OPENAI_API_KEY if not setting api_key explicitly
   #
   # Available Zai Models:
-  #   - glm-4.7      (default, 64K tokens, best for complex tasks)
-  #   - glm-4.6      (64K tokens, 200K context, high performance)
-  #   - glm-4.5      (32K tokens, general purpose)
-  #   - glm-4.5-x    (32K tokens, enhanced)
-  #   - glm-4.5-air  (32K tokens, lightweight)
-  #   - glm-4.5-airx (32K tokens, ultra-lightweight)
-  #   - glm-4.5-flash (8K tokens, fastest)
-  #
-  # Rate Limiting Recommendations:
-  #   - Start with conservative limits (10-60 RPM) to avoid hitting quotas
-  #   - If you get 429 errors, decrease requests_per_minute
-  #   - Free tiers typically have lower limits (e.g., 10-30 RPM)
-  #   - Paid tiers can handle higher limits (e.g., 100-500 RPM)
-  #   - The bot automatically retries with exponential backoff on rate limits
+  #   - glm-4.7      (Flagship)
+  #   - glm-4.5      (General Purpose)
+  #   - glm-4.5-flash (Fast)
 
   # ==========================================================================
   # Gemini Provider (Google)
