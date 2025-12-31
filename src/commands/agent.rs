@@ -1,8 +1,9 @@
 use crate::commands::core::execute_with_fallback;
-use crate::config::AppConfig;
+use crate::core::config::AppConfig;
 use crate::services::ChatService;
+
+use crate::core::state::BotState;
 use crate::services::message_helper::MessageHelper;
-use crate::state::BotState;
 use std::fs;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -337,7 +338,7 @@ pub async fn handle_ask<S: ChatService + Clone + Send + 'static>(
             }
 
             // Read state.md for execution history AND conversations
-            let state_manager = crate::state::project::ProjectStateManager::new(wd.clone());
+            let state_manager = crate::core::state::project::ProjectStateManager::new(wd.clone());
             if let Ok(history) = state_manager.get_recent_history(5) {
                 if !history.contains("No execution history yet") {
                     execution_history = format!("\n\n### Recent Execution History\n{}\n", history);
@@ -416,7 +417,7 @@ pub async fn handle_ask<S: ChatService + Clone + Send + 'static>(
 
         // Log conversation to state.md for future context
         if let Some(ref wd) = working_dir {
-            let state_manager = crate::state::project::ProjectStateManager::new(wd.clone());
+            let state_manager = crate::core::state::project::ProjectStateManager::new(wd.clone());
             let _ = state_manager.log_conversation(&user_question, &final_content);
         }
 

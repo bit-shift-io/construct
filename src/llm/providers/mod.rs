@@ -9,7 +9,7 @@ mod anthropic;
 mod gemini;
 mod openai;
 
-use crate::config::{AgentConfig, AppConfig};
+use crate::core::config::{AgentConfig, AppConfig};
 use crate::llm::{Context, Error, Provider, Response};
 
 /// Configuration for a provider

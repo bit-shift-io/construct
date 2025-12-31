@@ -1,6 +1,6 @@
-use crate::config::AppConfig;
+use crate::core::config::AppConfig;
 use crate::services::ChatService;
-use crate::state::BotState;
+use crate::core::state::BotState;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -34,7 +34,7 @@ pub async fn handle_build(
         }
     } else {
         // Fallback to direct execution (if MCP unavailable)
-        match crate::utils::run_command(cmd, working_dir).await {
+        match crate::core::utils::run_command(cmd, working_dir).await {
             Ok(o) => o,
             Err(e) => e,
         }
@@ -78,7 +78,7 @@ pub async fn handle_deploy(
         }
     } else {
         // Fallback to direct execution
-        match crate::utils::run_command(cmd, working_dir).await {
+        match crate::core::utils::run_command(cmd, working_dir).await {
             Ok(o) => o,
             Err(e) => e,
         }
@@ -121,7 +121,7 @@ pub async fn handle_check(
         }
     } else {
         // Fallback to direct execution
-        match crate::utils::run_command(cmd, working_dir).await {
+        match crate::core::utils::run_command(cmd, working_dir).await {
             Ok(o) => o,
             Err(e) => e,
         }

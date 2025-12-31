@@ -1,7 +1,7 @@
 use crate::commands;
-use crate::config::AppConfig;
+use crate::core::config::AppConfig;
 use crate::services::ChatService;
-use crate::state::BotState;
+use crate::core::state::BotState;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 

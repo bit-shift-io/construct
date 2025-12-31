@@ -35,7 +35,7 @@
 //! ```
 
 mod client;
-mod providers;
+pub mod providers;
 mod types;
 
 pub use client::Client;

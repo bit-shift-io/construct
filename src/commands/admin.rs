@@ -1,5 +1,5 @@
-use crate::config::AppConfig;
-use crate::state::BotState;
+use crate::core::config::AppConfig;
+use crate::core::state::BotState;
 
 use crate::services::ChatService;
 use std::sync::Arc;
@@ -137,7 +137,7 @@ pub async fn handle_command(
         return;
     }
 
-    let output = match crate::utils::run_shell_command(command, cwd.as_deref()).await {
+    let output = match crate::core::utils::run_shell_command(command, cwd.as_deref()).await {
         Ok(o) => o,
         Err(e) => e,
     };

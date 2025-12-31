@@ -1,6 +1,7 @@
-use crate::services::ChatService;
-use crate::state::BotState;
+use crate::core::config::AppConfig;
+use crate::core::state::BotState;
 use std::sync::Arc;
+use crate::services::ChatService;
 use tokio::sync::Mutex;
 
 /// Shows current git changes in the active project.
@@ -26,7 +27,7 @@ pub async fn handle_changes(
         }
     } else {
         // Fallback to direct execution
-        match crate::utils::run_command("git diff", working_dir).await {
+        match crate::core::utils::run_command("git diff", working_dir).await {
             Ok(o) => o,
             Err(e) => e,
         }
@@ -69,7 +70,7 @@ pub async fn handle_commit(
             }
         } else {
             // Fallback to direct execution
-            match crate::utils::run_command(&cmd, working_dir).await {
+            match crate::core::utils::run_command(&cmd, working_dir).await {
                 Ok(o) => o,
                 Err(e) => e,
             }
@@ -101,7 +102,7 @@ pub async fn handle_discard(
             .await;
     } else {
         // Fallback to direct execution
-        let _ = crate::utils::run_command("git checkout .", working_dir).await;
+        let _ = crate::core::utils::run_command("git checkout .", working_dir).await;
     }
     let _ = room
         .send_markdown(crate::strings::messages::CHANGES_DISCARDED)

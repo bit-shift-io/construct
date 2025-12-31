@@ -1,4 +1,4 @@
-use crate::features::feed::FeedManager;
+use crate::core::features::feed::FeedManager;
 use crate::services::ChatService;
 
 /// Send or edit a message in the feed.
@@ -56,22 +56,22 @@ pub fn get_or_create_feed_manager(
 
 /// Format wizard step content for feed display.
 pub fn format_wizard_step(
-    step: &crate::state::WizardStep,
-    _mode: &crate::state::WizardMode,
+    step: &crate::core::state::WizardStep,
+    _mode: &crate::core::state::WizardMode,
     buffer: &str,
     data: &std::collections::HashMap<String, String>,
 ) -> String {
     match step {
-        crate::state::WizardStep::ProjectName => {
+        crate::core::state::WizardStep::ProjectName => {
             "🚀 **New Project Wizard**\n\n\
              Please enter a Project Folder Name (no spaces, e.g., my-cool-app):".to_string()
         }
-        crate::state::WizardStep::ProjectType => {
+        crate::core::state::WizardStep::ProjectType => {
             "📝 **Project Description**\n\n\
              Describe your project. Please include the programming language and tech stack you want to use.\n\n\
              Type .ok to finish and create the project.".to_string()
         }
-        crate::state::WizardStep::Description => {
+        crate::core::state::WizardStep::Description => {
             format!(
                 "📝 **Project Description**\n\n\
                  Current description:\n\
@@ -80,7 +80,7 @@ pub fn format_wizard_step(
                 buffer
             )
         }
-        crate::state::WizardStep::Confirmation => {
+        crate::core::state::WizardStep::Confirmation => {
             let name = data.get("name").unwrap_or(&"?".to_string()).clone();
             format!(
                 "✅ **Confirm Project Creation**\n\n\
@@ -90,7 +90,7 @@ pub fn format_wizard_step(
                 name, buffer
             )
         }
-        crate::state::WizardStep::TaskDescription => {
+        crate::core::state::WizardStep::TaskDescription => {
             if buffer.is_empty() {
                 "📝 **Task Description**\n\n\
                  Please describe the task you want to accomplish.\n\n\
@@ -105,7 +105,7 @@ pub fn format_wizard_step(
                 )
             }
         }
-        crate::state::WizardStep::Stack => {
+        crate::core::state::WizardStep::Stack => {
             "🔧 **Tech Stack**\n\n\
              Please describe the tech stack you want to use (frameworks, libraries, etc.).".to_string()
         }

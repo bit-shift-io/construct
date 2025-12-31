@@ -3,7 +3,7 @@
 /// This module provides functionality to update the last bot message instead
 /// of sending new messages, reducing chat spam and providing a cleaner UX.
 use crate::services::ChatService;
-use crate::state::BotState;
+use crate::core::state::BotState;
 
 /// Message helper for managing bot messages
 #[derive(Clone)]

@@ -1,6 +1,6 @@
 //! Simple LLM client for multiple providers with native caching support
 
-use crate::config::AppConfig;
+use crate::core::config::AppConfig;
 use crate::llm::providers;
 use crate::llm::{Context, Error, Provider, Response};
 

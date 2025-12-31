@@ -1,4 +1,4 @@
-use crate::config::AppConfig;
+use crate::core::config::AppConfig;
 use std::collections::HashSet;
 use std::time::Duration;
 

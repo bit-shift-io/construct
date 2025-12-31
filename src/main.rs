@@ -1,24 +1,13 @@
 #![recursion_limit = "256"]
 
-mod bridge;
 mod commands;
-mod config;
-mod mcp;
-
+mod core;
 mod llm;
-
-// Conditionally include Redis support
-#[cfg(feature = "redis")]
-mod redis;
-
-mod features;
-// Conditionally include Redis support
+mod mcp;
 mod patterns;
 #[cfg(feature = "redis")]
 mod redis;
 mod services;
-mod state;
-mod utils;
 
 mod strings;
 
@@ -41,10 +30,10 @@ use tokio::sync::Mutex;
 use tracing;
 use tracing_subscriber;
 
-use crate::bridge::BridgeManager;
-use crate::config::AppConfig;
+use crate::core::bridge::BridgeManager;
+use crate::core::config::AppConfig;
 use crate::services::matrix::MatrixService;
-use crate::state::BotState;
+use crate::core::state::BotState;
 use std::time::SystemTime;
 
 /// Static configuration and state managers.

@@ -1,8 +1,8 @@
-use crate::config::AppConfig;
-use crate::features::feed::FeedManager;
+use crate::core::config::AppConfig;
+use crate::core::features::feed::FeedManager;
 use crate::services::ChatService;
-use crate::state::{BotState, WizardMode, WizardState, WizardStep};
-use crate::utils::feed_helper;
+use crate::core::state::{BotState, WizardMode, WizardState, WizardStep};
+use crate::core::utils::feed_helper;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing;

@@ -1,6 +1,6 @@
-use crate::config::AppConfig;
+use crate::core::config::AppConfig;
 use crate::services::ChatService;
-use crate::state::BotState;
+use crate::core::state::BotState;
 use std::fs;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -263,7 +263,7 @@ pub async fn handle_project(
         let room_state = bot_state.get_room_state(&room_id);
         let resp = match &room_state.current_project_path {
             Some(path) => {
-                let name = crate::utils::get_project_name(path);
+                let name = crate::core::utils::get_project_name(path);
                 format!("📂 **Current project**: `{}`", name)
             }
             None => "📂 **No project set**. Use `.project _path_`".to_string(),

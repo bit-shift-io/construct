@@ -1,9 +1,10 @@
 use crate::commands::agent::resolve_agent_name;
-use crate::config::AppConfig;
-use crate::features::feed::FeedManager;
-use crate::llm::{Client, Context};
+use crate::core::config::AppConfig;
+use crate::core::features::feed::FeedManager;
+use crate::llm::{Client, Context, Message, MessageRole, Provider};
+use crate::core::state::BotState;
+use crate::core::utils;
 use crate::services::ChatService;
-use crate::state::BotState;
 use chrono;
 use std::fs;
 use std::sync::Arc;
@@ -260,7 +261,7 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
 
         // Add recent execution history to context
         let recent_history = if let Some(ref wd) = working_dir {
-            let state_manager = crate::state::project::ProjectStateManager::new(wd.clone());
+            let state_manager = crate::core::state::project::ProjectStateManager::new(wd.clone());
             state_manager.get_recent_history(5).unwrap_or_default()
         } else {
             String::new()
@@ -278,7 +279,7 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
         // Detect error patterns from past failures
         let mut error_patterns_context = String::new();
         if let Some(ref wd) = working_dir {
-            let state_manager = crate::state::project::ProjectStateManager::new(wd.clone());
+            let state_manager = crate::core::state::project::ProjectStateManager::new(wd.clone());
             if let Ok(patterns) = state_manager.detect_error_patterns() {
                 if !patterns.is_empty() {
                     error_patterns_context = state_manager.format_error_patterns(&patterns);
@@ -336,7 +337,7 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                 };
 
                 conversation_history.push_str(&format!("\n\nAgent: {}", clean_response));
-                let actions = crate::utils::parse_actions(&response);
+                let actions = crate::core::utils::parse_actions(&response);
 
                 if actions.is_empty() {
                     let _ = room_clone
@@ -354,9 +355,9 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
 
                 for action in actions {
                     match action {
-                        crate::utils::AgentAction::ShellCommand(content) => {
+                        crate::core::utils::AgentAction::ShellCommand(content) => {
                             // Update feed with new command
-                            feed_manager.process_action(&crate::utils::AgentAction::ShellCommand(
+                            feed_manager.process_action(&crate::core::utils::AgentAction::ShellCommand(
                                 content.clone(),
                             ));
                             if let Some(eid) = feed_manager.get_event_id() {
@@ -401,7 +402,7 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                                         Ok(o) => o,
                                         Err(_e) => {
                                             // Fallback to direct execution on MCP error
-                                            match crate::utils::run_shell_command_with_timeout(
+                                            match crate::core::utils::run_shell_command_with_timeout(
                                                 &content,
                                                 working_dir.as_deref(),
                                                 Some(timeout_duration),
@@ -415,7 +416,7 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                                     }
                                 } else {
                                     // No MCP available, use direct execution
-                                    match crate::utils::run_shell_command_with_timeout(
+                                    match crate::core::utils::run_shell_command_with_timeout(
                                         &content,
                                         working_dir.as_deref(),
                                         Some(timeout_duration),
@@ -444,12 +445,12 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                                 .push_str(&format!("\n\nSystem Command Output: {}", cmd_result));
                         }
                         // OTHER ACTIONS (WriteFile, Done, etc) - NEED TO INCLUDE
-                        crate::utils::AgentAction::Done => {
+                        crate::core::utils::AgentAction::Done => {
                             // Verify compilation/task status before allowing completion
                             let verification_passed = if let Some(ref wd) = working_dir {
                                 // Check if this is a Rust project
                                 if std::path::Path::new(&format!("{}/Cargo.toml", wd)).exists() {
-                                    match crate::utils::run_shell_command_with_timeout(
+                                    match utils::run_shell_command_with_timeout(
                                         "cargo check",
                                         Some(wd),
                                         Some(std::time::Duration::from_secs(120)),
@@ -506,7 +507,7 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                                     let mut build_result =
                                         Err("No build command succeeded".to_string());
                                     for cmd in test_commands {
-                                        match crate::utils::run_shell_command_with_timeout(
+                                        match utils::run_shell_command_with_timeout(
                                             cmd,
                                             Some(wd),
                                             Some(std::time::Duration::from_secs(120)),
@@ -543,7 +544,7 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                                     }
                                 } else if std::path::Path::new(&format!("{}/go.mod", wd)).exists() {
                                     // Check if this is a Go project
-                                    match crate::utils::run_shell_command_with_timeout(
+                                    match utils::run_shell_command_with_timeout(
                                         "go build",
                                         Some(wd),
                                         Some(std::time::Duration::from_secs(120)),
@@ -574,7 +575,7 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                                         .exists()
                                 {
                                     // Check if this is a Python project
-                                    match crate::utils::run_shell_command_with_timeout(
+                                    match utils::run_shell_command_with_timeout(
                                         "python -m py_compile */*.py 2>/dev/null || exit 0",
                                         Some(wd),
                                         Some(std::time::Duration::from_secs(60)),
@@ -612,7 +613,7 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                             };
 
                             if verification_passed {
-                                feed_manager.process_action(&crate::utils::AgentAction::Done);
+                                feed_manager.process_action(&crate::core::utils::AgentAction::Done);
                                 feed_manager.complete_task();
                                 if let Some(eid) = feed_manager.get_event_id() {
                                     let _ = room_clone
@@ -816,7 +817,7 @@ pub async fn handle_status(
     let mut status = String::new();
 
     let current_path = room_state.current_project_path.as_deref().unwrap_or("None");
-    let project_name = crate::utils::get_project_name(current_path);
+    let project_name = crate::core::utils::get_project_name(current_path);
 
     status.push_str(&format!("**Project**: `{}`\n", project_name));
     status.push_str(&format!(
@@ -888,7 +889,7 @@ pub async fn handle_task<S: ChatService + Clone + Send + 'static>(
             }
 
             // Read state.md for execution history
-            let state_manager = crate::state::project::ProjectStateManager::new(wd.clone());
+            let state_manager = crate::core::state::project::ProjectStateManager::new(wd.clone());
             if let Ok(history) = state_manager.get_recent_history(10) {
                 if !history.contains("No execution history yet") {
                     execution_history = format!("\n\n### Recent Execution History\n{}\n", history);
@@ -1198,7 +1199,7 @@ pub async fn handle_ok<S: ChatService + Clone + Send + 'static>(
         };
 
         // We execute the command
-        match crate::utils::run_command(&command, working_dir.as_deref()).await {
+        match crate::core::utils::run_command(&command, working_dir.as_deref()).await {
             Ok(out) => {
                 let _ = room
                     .send_markdown(&format!("**Output**:\n```\n{}\n```", out))
