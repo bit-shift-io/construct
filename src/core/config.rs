@@ -18,6 +18,7 @@ pub struct AppConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 pub struct CommandsConfig {
     #[serde(default = "default_command_mode")]
     pub default: String,
@@ -152,6 +153,7 @@ pub struct MatrixConfig {
 
 /// Configuration for MCP (Model Context Protocol) server
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 pub struct McpConfig {
     /// Path to the MCP server binary
     pub server_path: String,

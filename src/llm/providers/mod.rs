@@ -9,7 +9,7 @@ mod anthropic;
 mod gemini;
 mod openai;
 
-use crate::core::config::{AgentConfig, AppConfig};
+use crate::core::config::AgentConfig;
 use crate::llm::{Context, Error, Provider, Response};
 
 /// Configuration for a provider
@@ -48,40 +48,7 @@ impl ProviderConfig {
         })
     }
 
-    pub fn from_app_config(provider: Provider, app_config: &AppConfig) -> Result<Self, Error> {
-        let protocol = provider.as_str();
 
-        // Try to find matching agent config
-        for (_name, agent_config) in &app_config.agents {
-            if agent_config.provider == protocol {
-                return Self::from_agent_config(agent_config);
-            }
-        }
-
-        // Fallback to environment variables
-        let env_var = match provider {
-            Provider::OpenAI => "OPENAI_API_KEY",
-            Provider::Anthropic => "ANTHROPIC_API_KEY",
-            Provider::Gemini => "GEMINI_API_KEY",
-            Provider::Groq => "GROQ_API_KEY",
-            Provider::XAI => "XAI_API_KEY",
-            Provider::DeepAI => "DEEPAI_API_KEY",
-            Provider::Zai => "ZAI_API_KEY",
-        };
-
-        let api_key = std::env::var(env_var).map_err(|e| {
-            Error::new(
-                protocol,
-                format!("API key env var {} not set: {}", env_var, e),
-            )
-        })?;
-
-        Ok(Self {
-            api_key,
-            base_url: None,
-            default_model: String::new(),
-        })
-    }
 }
 
 /// Execute a chat request with the specified provider

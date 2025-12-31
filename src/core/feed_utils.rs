@@ -42,17 +42,8 @@ pub async fn start_feed<S: ChatService>(
     Ok(())
 }
 
-/// Get or create a FeedManager for the current room state.
-/// Returns a clone of the existing feed manager, or creates a new one.
-pub fn get_or_create_feed_manager(
-    current_project_path: Option<String>,
-    existing_feed: Option<&FeedManager>,
-) -> FeedManager {
-    match existing_feed {
-        Some(feed) => feed.clone(),
-        None => FeedManager::new(current_project_path),
-    }
-}
+
+
 
 /// Format wizard step content for feed display.
 pub fn format_wizard_step(
@@ -112,50 +103,8 @@ pub fn format_wizard_step(
     }
 }
 
-/// Build user-friendly feed content from generated plan files.
-pub fn format_plan_content(
-    plan_content: Option<&str>,
-    tasks_content: Option<&str>,
-    roadmap_content: Option<&str>,
-) -> String {
-    let mut feed_content = String::new();
 
-    feed_content.push_str("## 📋 Project Setup Complete\n\n");
 
-    if let Some(plan) = plan_content {
-        feed_content.push_str("### Plan\n\n");
-        feed_content.push_str(plan);
-        feed_content.push_str("\n\n");
-    }
 
-    if let Some(tasks) = tasks_content {
-        feed_content.push_str("### Tasks\n\n");
-        feed_content.push_str(tasks);
-        feed_content.push_str("\n\n");
-    }
 
-    if let Some(roadmap) = roadmap_content {
-        feed_content.push_str("### Roadmap\n\n");
-        feed_content.push_str(roadmap);
-    }
 
-    feed_content
-}
-
-/// Parse a file section from agent output.
-/// Extracts content between ```markdown and ``` markers for a specific filename.
-pub fn parse_file(filename: &str, output: &str) -> Option<String> {
-    let file_marker = format!("{}#", filename);
-
-    // Find the file marker
-    let marker_pos = output.find(&file_marker)?;
-    let search_from = &output[marker_pos..];
-    let start_relative = search_from.find("```markdown")?;
-
-    // Find the closing ``` after the opening ```markdown
-    let content_section = &search_from[start_relative + 13..];
-    let end_relative = content_section.find("```")?;
-
-    let content = &content_section[..end_relative];
-    Some(content.trim().to_string())
-}

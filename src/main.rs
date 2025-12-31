@@ -3,7 +3,7 @@ mod commands;
 mod core;
 mod llm;
 mod mcp;
-mod patterns;
+
 mod services;
 mod strings;
 

@@ -63,6 +63,7 @@ struct CacheControl {
 
 /// Anthropic API response format
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct AnthropicResponse {
     id: String,
     model: String,

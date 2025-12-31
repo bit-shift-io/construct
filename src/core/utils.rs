@@ -49,22 +49,7 @@ pub fn parse_actions(response: &str) -> Vec<AgentAction> {
 }
 
 /// Log parsed actions for debugging
-pub fn log_actions(actions: &[AgentAction]) {
-    for (i, action) in actions.iter().enumerate() {
-        match action {
-            AgentAction::ShellCommand(cmd) => {
-                log_interaction(
-                    "ACTION_PARSED",
-                    "system",
-                    &format!("Action {}: ShellCommand({})", i, cmd),
-                );
-            }
-            AgentAction::Done => {
-                log_interaction("ACTION_PARSED", "system", &format!("Action {}: Done", i));
-            }
-        }
-    }
-}
+
 
 /// Helper to run a shell command and return stdout/stderr.
 pub async fn run_command(command: &str, folder: Option<&str>) -> Result<String, String> {

@@ -149,13 +149,7 @@ impl FeedManager {
         }
     }
 
-    /// Mark the feed as paused (waiting for user input)
-    pub fn pause(&mut self) {
-        self.add_entry(
-            "WAITING".to_string(),
-            "Waiting for user input...".to_string(),
-        );
-    }
+
 
     /// Transition to squashed mode (when a task completes)
     pub fn squash(&mut self) {

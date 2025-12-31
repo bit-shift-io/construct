@@ -1,4 +1,4 @@
-pub const STATUS_HEADER: &str = "**📊 System Status**\n\n";
+
 
 pub fn model_set(name: &str) -> String {
     format!("✅ **Model set to**: `{name}`")
@@ -49,17 +49,13 @@ pub fn execution_complete(result: &str, output: &str) -> String {
     format!("🏁 **Execution Complete**\n\n{result}{output}")
 }
 
-pub fn result_summary(summary: &str) -> String {
-     format!("\n### 📋 Result\n{summary}")
-}
+
 
 pub fn agent_says(msg: &str) -> String {
     format!("🤔 **Agent says**:\n{msg}")
 }
 
-pub fn agent_output(output: &str) -> String {
-    format!("✅ **Output**:\n```\n{output}\n```")
-}
+
 
 pub const STOP_REQUEST_WAIT: &str = "🛑 **Stop requested**. Waiting for current step to finish...";
 
@@ -100,21 +96,13 @@ pub fn code_block_output(content: &str) -> String {
     format!("```\n{content}\n```")
 }
 
-pub fn command_blocked(cmd: &str) -> String {
-    format!("Command '{cmd}' is explicitly blocked. Please use a safer alternative (e.g., cat, ls, grep, echo).")
-}
 
-pub fn command_ask(cmd: &str) -> String {
-    format!("Command '{cmd}' requires confirmation.")
-}
 
-pub fn command_not_allowed(cmd: &str) -> String {
-    format!("Command '{cmd}' is not in allowlist.")
-}
 
-pub fn command_unknown(cmd: &str) -> String {
-    format!("Unknown command '{cmd}' (default policy is ask).")
-}
+
+
+
+
 
 pub fn command_run_failed(err: &str) -> String {
     format!("Failed to run command: {err}")
@@ -124,56 +112,20 @@ pub fn shell_command_failed(err: &str) -> String {
     format!("Failed to run shell command: {err}")
 }
 
-pub fn command_approval_request(cmd: &str) -> String {
-    format!("⚠️ **Command requires confirmation**:\n`{cmd}`\n\nType `.ok` to allow or `.no` to deny/skip.")
-}
+
 
 pub const COMMAND_DENIED_USER: &str = "🚫 **Command denied by user**.";
 pub const NO_PENDING_COMMAND: &str = "⚠️ **No pending command to approve/deny**.";
 
-pub fn missing_env_var(var: &str) -> String {
-    format!("Missing env var {var}")
-}
 
-pub fn gemini_fetch_failed(err: &str) -> String {
-    format!("Failed to fetch Gemini models: {err}")
-}
 
-pub fn gemini_api_error(err: &str) -> String {
-    format!("Gemini API Error: {err}")
-}
 
-pub fn gemini_parse_error(err: &str) -> String {
-    format!("Failed to parse Gemini response: {err}")
-}
 
-pub fn anthropic_fetch_failed(err: &str) -> String {
-    format!("Failed to fetch Anthropic models: {err}")
-}
 
-pub fn anthropic_api_error(err: &str) -> String {
-    format!("Anthropic API Error: {err}")
-}
 
-pub fn anthropic_parse_error(err: &str) -> String {
-    format!("Failed to parse Anthropic response: {err}")
-}
 
-pub fn deepai_request_failed(err: &str) -> String {
-    format!("DeepAI Request Failed: {err}")
-}
 
-pub fn deepai_api_error(err: &str) -> String {
-    format!("DeepAI API Error: {err}")
-}
 
-pub fn deepai_parse_error(err: &str) -> String {
-    format!("DeepAI Parse Error: {err}")
-}
-
-pub fn unsupported_provider(provider: &str) -> String {
-    format!("Unsupported Unified provider: {provider}")
-}
 
 pub const NO_PROJECTS_CONFIGURED: &str = "⚠️ No `projects_dir` configured.";
 pub const PROVIDE_PROJECT_NAME: &str = "⚠️ **Please provide a project name**: `.new _name_`";
@@ -217,13 +169,7 @@ pub fn models_header(agent: &str) -> String {
     format!("**🤖 Models for Agent: {}**\n\n", agent)
 }
 
-pub fn sandbox_escape_error(path: &str) -> String {
-    format!("Path '{}' escapes sandbox boundary", path)
-}
 
-pub fn sandbox_escape_parent_error(path: &str) -> String {
-    format!("Path '{}' would escape sandbox boundary", path)
-}
 
 pub fn list_projects_failed(err: &str) -> String {
     format!("⚠️ Failed to list projects: {err}")

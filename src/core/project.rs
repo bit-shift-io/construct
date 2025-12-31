@@ -121,32 +121,13 @@ impl ProjectStateManager {
     }
 
     /// Checks if state.md exists.
-    pub fn exists(&self) -> bool {
-        Path::new(&self.state_file_path()).exists()
-    }
+
 
     /// Initializes state.md if it doesn't exist.
-    pub fn initialize(&self) -> Result<(), String> {
-        let state_path = self.state_file_path();
-        if !Path::new(&state_path).exists() {
-            fs::write(
-                &state_path,
-                "# Project State\n\nThis file tracks the execution history and context for this project.\n",
-            )
-            .map_err(|e| format!("Failed to create state.md: {}", e))?;
-        }
-        Ok(())
-    }
+
 
     /// Clears all content from state.md.
-    pub fn clear(&self) -> Result<(), String> {
-        let state_path = self.state_file_path();
-        fs::write(
-            &state_path,
-            "# Project State\n\nThis file tracks the execution history and context for this project.\n",
-        )
-        .map_err(|e| format!("Failed to clear state.md: {}", e))
-    }
+
 
     /// Gets recent conversations from state.md formatted for agent context.
     /// Returns the last N conversation exchanges (user question + agent response).

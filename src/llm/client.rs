@@ -83,70 +83,9 @@ impl Client {
         providers::chat(provider_type, provider_config, context).await
     }
 
-    /// Send a chat request with full context
-    ///
-    /// # Arguments
-    /// * `agent_name` - The agent name
-    /// * `context` - Full context with messages, model, temperature, cache, etc.
-    ///
-    /// # Example
-    /// ```rust
-    /// let context = Context::new()
-    ///     .add_system_message("You are a helpful assistant.")
-    ///     .add_user_message("What is 2+2?")
-    ///     .add_assistant_message("2+2 equals 4.")
-    ///     .add_user_message("And what about 3+3?");
-    /// let response = client.chat("anthropic", context).await?;
-    /// println!("Response: {}", response.content);
-    /// ```
-    pub async fn chat(&self, agent_name: &str, context: Context) -> Result<Response, Error> {
-        // Look up agent configuration by agent name
-        let agent_config = self
-            .app_config
-            .agents
-            .get(agent_name)
-            .ok_or_else(|| Error::new(agent_name, "Agent not found"))?;
 
-        // Get provider type from agent config
-        let provider_type = Provider::from_str(&agent_config.provider)
-            .ok_or_else(|| Error::new(&agent_config.provider, "Unknown provider"))?;
 
-        // Get provider config from agent config
-        let provider_config = providers::ProviderConfig::from_agent_config(agent_config)?;
 
-        // Call provider with full context
-        providers::chat(provider_type, provider_config, context).await
-    }
-
-    /// Get provider configuration for an agent
-    ///
-    /// # Arguments
-    /// * `agent_name` - The agent name
-    ///
-    /// # Returns
-    /// The `ProviderConfig` containing api_key, endpoint, and default_model for this agent
-    ///
-    /// # Example
-    /// ```rust
-    /// let config = client.get_provider_config("zai")?;
-    /// println!("API Key: {}", config.api_key);
-    /// println!("Endpoint: {:?}", config.base_url);
-    /// println!("Default Model: {}", config.default_model);
-    /// ```
-    pub fn get_provider_config(
-        &self,
-        agent_name: &str,
-    ) -> Result<providers::ProviderConfig, Error> {
-        // Look up agent configuration by agent name
-        let agent_config = self
-            .app_config
-            .agents
-            .get(agent_name)
-            .ok_or_else(|| Error::new(agent_name, "Agent not found"))?;
-
-        // Get provider config from agent config (reads api_key, endpoint, default_model)
-        providers::ProviderConfig::from_agent_config(agent_config)
-    }
 }
 
 #[cfg(test)]

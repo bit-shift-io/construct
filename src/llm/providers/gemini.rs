@@ -64,6 +64,7 @@ struct GeminiResponse {
 
 /// Gemini response candidate
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct GeminiCandidate {
     content: GeminiContent,
     #[serde(rename = "finishReason")]

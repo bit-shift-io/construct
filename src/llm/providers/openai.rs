@@ -39,6 +39,7 @@ struct OpenAIMessage {
 
 /// OpenAI API response format
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct OpenAIResponse {
     id: String,
     model: String,
@@ -47,12 +48,14 @@ struct OpenAIResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct OpenAIChoice {
     message: OpenAIChoiceMessage,
     finish_reason: String,
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct OpenAIChoiceMessage {
     role: String,
     content: String,
