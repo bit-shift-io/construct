@@ -1,10 +1,13 @@
-use crate::commands::agent::resolve_agent_name;
+use crate::commands::{agent, system};
 use crate::core::config::AppConfig;
 use crate::core::feed::FeedManager;
-use crate::llm::{Client, Context};
+use crate::core::project::ProjectStateManager;
 use crate::core::state::BotState;
-use crate::core::utils;
+use crate::core::utils::{self, AgentAction};
+use crate::llm::{Client, Context};
+use crate::mcp::McpManager;
 use crate::services::ChatService;
+use crate::strings::{messages, prompts};
 use chrono;
 use std::fs;
 use std::sync::Arc;
@@ -152,13 +155,13 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
     active_agent: Option<String>,
     active_model: Option<String>,
     resume_existing_feed: bool,
-    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
+    mcp_manager: Option<Arc<McpManager>>,
 ) {
     let mut step_count = 0;
     let max_steps = 20;
 
-    let agent_name = resolve_agent_name(active_agent.as_deref(), &config);
-    let system_prompt = crate::strings::prompts::SYSTEM;
+    let agent_name = agent::resolve_agent_name(active_agent.as_deref(), &config);
+    let system_prompt = prompts::SYSTEM;
     let room_clone = room.clone();
 
     let (abort_tx, _abort_rx) = watch::channel(false);
@@ -227,7 +230,7 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                 room_state.stop_requested = false;
                 bot_state.save();
                 let _ = room_clone
-                    .send_markdown(crate::strings::messages::STOP_REQUESTED)
+                    .send_markdown(messages::STOP_REQUESTED)
                     .await;
                 break;
             }
@@ -236,7 +239,7 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
         step_count += 1;
         if step_count > max_steps {
             let _ = room_clone
-                .send_markdown(crate::strings::messages::LIMIT_REACHED)
+                .send_markdown(messages::LIMIT_REACHED)
                 .await;
             break;
         }
@@ -261,7 +264,7 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
 
         // Add recent execution history to context
         let recent_history = if let Some(ref wd) = working_dir {
-            let state_manager = crate::core::project::ProjectStateManager::new(wd.clone());
+            let state_manager = ProjectStateManager::new(wd.clone());
             state_manager.get_recent_history(5).unwrap_or_default()
         } else {
             String::new()
@@ -274,12 +277,12 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                 String::new()
             };
 
-        let prompt = crate::strings::prompts::interactive_turn(&cwd_msg, &roadmap_content, &tasks_content);
+        let prompt = prompts::interactive_turn(&cwd_msg, &roadmap_content, &tasks_content);
 
         // Detect error patterns from past failures
         let mut error_patterns_context = String::new();
         if let Some(ref wd) = working_dir {
-            let state_manager = crate::core::project::ProjectStateManager::new(wd.clone());
+            let state_manager = ProjectStateManager::new(wd.clone());
             if let Ok(patterns) = state_manager.detect_error_patterns() {
                 if !patterns.is_empty() {
                     error_patterns_context = state_manager.format_error_patterns(&patterns);
@@ -337,12 +340,12 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                 };
 
                 conversation_history.push_str(&format!("\n\nAgent: {}", clean_response));
-                let actions = crate::core::utils::parse_actions(&response);
+                let actions = utils::parse_actions(&response);
 
                 if actions.is_empty() {
                     let _ = room_clone
                         .send_markdown(
-                                &crate::strings::messages::agent_says(&response),
+                                &messages::agent_says(&response),
                         )
                         .await;
                     // Save state
@@ -355,9 +358,9 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
 
                 for action in actions {
                     match action {
-                        crate::core::utils::AgentAction::ShellCommand(content) => {
+                        AgentAction::ShellCommand(content) => {
                             // Update feed with new command
-                            feed_manager.process_action(&crate::core::utils::AgentAction::ShellCommand(
+                            feed_manager.process_action(&AgentAction::ShellCommand(
                                 content.clone(),
                             ));
                             if let Some(eid) = feed_manager.get_event_id() {
@@ -384,7 +387,7 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
 
                                 // Use MCP if available, otherwise fall back to direct execution
                                 let timeout_duration =
-                                    crate::commands::system::get_command_timeout(&content, &config);
+                                    system::get_command_timeout(&content, &config);
                                 let timeout_secs = timeout_duration.as_secs();
 
                                 if let Some(mcp) = &mcp_manager {
@@ -402,7 +405,7 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                                         Ok(o) => o,
                                         Err(_e) => {
                                             // Fallback to direct execution on MCP error
-                                            match crate::core::utils::run_shell_command_with_timeout(
+                                            match utils::run_shell_command_with_timeout(
                                                 &content,
                                                 working_dir.as_deref(),
                                                 Some(timeout_duration),
@@ -416,7 +419,7 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                                     }
                                 } else {
                                     // No MCP available, use direct execution
-                                    match crate::core::utils::run_shell_command_with_timeout(
+                                    match utils::run_shell_command_with_timeout(
                                         &content,
                                         working_dir.as_deref(),
                                         Some(timeout_duration),
@@ -445,7 +448,8 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                                 .push_str(&format!("\n\nSystem Command Output: {}", cmd_result));
                         }
                         // OTHER ACTIONS (WriteFile, Done, etc) - NEED TO INCLUDE
-                        crate::core::utils::AgentAction::Done => {
+                        // OTHER ACTIONS (WriteFile, Done, etc) - NEED TO INCLUDE
+                        AgentAction::Done => {
                             // Verify compilation/task status before allowing completion
                             let verification_passed = if let Some(ref wd) = working_dir {
                                 // Check if this is a Rust project
@@ -613,7 +617,7 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                             };
 
                             if verification_passed {
-                                feed_manager.process_action(&crate::core::utils::AgentAction::Done);
+                                feed_manager.process_action(&AgentAction::Done);
                                 feed_manager.complete_task();
                                 if let Some(eid) = feed_manager.get_event_id() {
                                     let _ = room_clone
@@ -626,7 +630,7 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
                                 }
                                 let _ = room_clone
                                     .send_markdown(
-                                        &crate::strings::messages::execution_complete("", ""),
+                                        &messages::execution_complete("", ""),
                                     )
                                     .await;
                                 {
@@ -662,7 +666,7 @@ pub async fn handle_stop(state: Arc<Mutex<BotState>>, room: &impl ChatService) {
     }
     bot_state.save();
     let _ = room
-        .send_markdown(crate::strings::messages::STOP_REQUEST_WAIT)
+        .send_markdown(messages::STOP_REQUEST_WAIT)
         .await;
 }
 
@@ -670,7 +674,7 @@ pub async fn handle_stop(state: Arc<Mutex<BotState>>, room: &impl ChatService) {
 pub async fn handle_approve<S: ChatService + Clone + Send + 'static>(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
-    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
+    mcp_manager: Option<Arc<McpManager>>,
     room: &S,
 ) {
     let mut bot_state = state.lock().await;
@@ -692,7 +696,7 @@ pub async fn handle_approve<S: ChatService + Clone + Send + 'static>(
             .unwrap_or_else(|| "tasks.md".to_string());
         let tasks = fs::read_to_string(&tasks_path).unwrap_or_default();
 
-        let initial_history = crate::strings::prompts::initial_history_context(
+        let initial_history = prompts::initial_history_context(
             &task_desc,
             &plan,
             &tasks,
@@ -708,7 +712,7 @@ pub async fn handle_approve<S: ChatService + Clone + Send + 'static>(
         tokio::spawn(async move {
             let _ = room_clone
                 .send_markdown(
-                        &crate::strings::messages::plan_approved(&task_desc),
+                        &messages::plan_approved(&task_desc),
                 )
                 .await;
             run_interactive_loop(
@@ -726,7 +730,7 @@ pub async fn handle_approve<S: ChatService + Clone + Send + 'static>(
         });
     } else {
         let _ = room
-            .send_markdown(crate::strings::messages::NO_TASK_APPROVE)
+            .send_markdown(messages::NO_TASK_APPROVE)
             .await;
     }
 }
@@ -735,7 +739,7 @@ pub async fn handle_approve<S: ChatService + Clone + Send + 'static>(
 pub async fn handle_continue<S: ChatService + Clone + Send + 'static>(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
-    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
+    mcp_manager: Option<Arc<McpManager>>,
     room: &S,
 ) {
     let mut bot_state = state.lock().await;
@@ -756,7 +760,7 @@ pub async fn handle_continue<S: ChatService + Clone + Send + 'static>(
 
         tokio::spawn(async move {
             let _ = room_clone
-                .send_markdown(crate::strings::messages::RESUMING_EXECUTION)
+                .send_markdown(messages::RESUMING_EXECUTION)
                 .await;
             run_interactive_loop(
                 config_clone,
@@ -773,7 +777,7 @@ pub async fn handle_continue<S: ChatService + Clone + Send + 'static>(
         });
     } else {
         let _ = room
-            .send_markdown(crate::strings::messages::NO_HISTORY_CONTINUE)
+            .send_markdown(messages::NO_HISTORY_CONTINUE)
             .await;
     }
 }
@@ -782,7 +786,7 @@ pub async fn handle_continue<S: ChatService + Clone + Send + 'static>(
 pub async fn handle_start<S: ChatService + Clone + Send + 'static>(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
-    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
+    mcp_manager: Option<Arc<McpManager>>,
     room: &S,
 ) {
     let should_continue = false; // logic removed/simplified as requested in orig file
@@ -822,7 +826,7 @@ pub async fn handle_status(
     status.push_str(&format!("**Project**: `{}`\n", project_name));
     status.push_str(&format!(
         "**Agent**: `{}` | `{}`\n",
-        resolve_agent_name(room_state.active_agent.as_deref(), config),
+        agent::resolve_agent_name(room_state.active_agent.as_deref(), config),
         room_state.active_model.as_deref().unwrap_or("None")
     ));
 
@@ -948,7 +952,7 @@ pub async fn handle_task<S: ChatService + Clone + Send + 'static>(
 
         let _ = room_clone.typing(true).await;
 
-        let agent_name = resolve_agent_name(active_agent.as_deref(), &config_clone);
+        let agent_name = agent::resolve_agent_name(active_agent.as_deref(), &config_clone);
 
         // Send initial status message
         let _ = room_clone.send_markdown("⏳ Processing task...").await;
@@ -1100,7 +1104,7 @@ pub async fn handle_modify<S: ChatService + Clone + Send + 'static>(
             &feedback_clone
         );
 
-        let agent_name = resolve_agent_name(active_agent.as_deref(), &config_clone);
+        let agent_name = agent::resolve_agent_name(active_agent.as_deref(), &config_clone);
 
         // Send initial status message
         let _ = room_clone

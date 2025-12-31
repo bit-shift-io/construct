@@ -1,9 +1,9 @@
 use crate::commands::core::execute_with_fallback;
 use crate::core::config::AppConfig;
-use crate::services::ChatService;
-
 use crate::core::state::BotState;
 use crate::services::message_helper::MessageHelper;
+use crate::services::ChatService;
+use crate::strings::messages;
 use std::fs;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -110,12 +110,12 @@ pub async fn handle_agent(
             bot_state.save();
             let _ = room
                 .send_markdown(
-                        &crate::strings::messages::model_set(&agent_name),
+                        &messages::model_set(&agent_name),
                 )
                 .await;
             return;
         } else {
-            let _ = room.send_markdown(crate::strings::messages::INVALID_AGENT_SELECTION).await;
+            let _ = room.send_markdown(messages::INVALID_AGENT_SELECTION).await;
             // Fallthrough to show list? Or return?
             // Let's show list to be helpful
         }
@@ -137,10 +137,10 @@ pub async fn handle_agent(
     let _ = room_state;
     bot_state.save();
 
-    let mut response = crate::strings::messages::AVAILABLE_AGENTS_HEADER.to_string();
+    let mut response = messages::AVAILABLE_AGENTS_HEADER.to_string();
 
     if final_list.is_empty() {
-        response.push_str(crate::strings::messages::NO_AGENTS_AVAILABLE);
+        response.push_str(messages::NO_AGENTS_AVAILABLE);
     } else {
         for (idx, name) in final_list.iter().enumerate() {
             let marker = if name == &current_agent { "✅" } else { "" };
@@ -148,7 +148,7 @@ pub async fn handle_agent(
         }
     }
 
-    response.push_str(crate::strings::messages::AGENT_SWITCH_INSTRUCTION);
+    response.push_str(messages::AGENT_SWITCH_INSTRUCTION);
     let _ = room.send_markdown(&response).await;
 }
 
@@ -181,7 +181,7 @@ pub async fn handle_models(
             .unwrap_or("auto")
             .to_string();
 
-        (crate::strings::messages::models_header(&active), active)
+        (messages::models_header(&active), active)
     };
 
     // Find the config for this agent
@@ -198,7 +198,7 @@ pub async fn handle_models(
 
     let Some(cfg) = agent_config else {
         let _ = room
-            .send_markdown(crate::strings::messages::ACTIVE_AGENT_CONFIG_NOT_FOUND)
+            .send_markdown(messages::ACTIVE_AGENT_CONFIG_NOT_FOUND)
             .await;
         return;
     };
@@ -233,7 +233,7 @@ pub async fn handle_models(
         bot_state.save();
 
         if model_list.is_empty() {
-            response.push_str(crate::strings::messages::NO_MODELS_FOUND);
+            response.push_str(messages::NO_MODELS_FOUND);
         } else {
             for (idx, name) in model_list.iter().enumerate() {
                 let marker = if name == &current_model { "✅" } else { "" };
@@ -242,7 +242,7 @@ pub async fn handle_models(
         }
     }
 
-    response.push_str(crate::strings::messages::MODEL_SWITCH_INSTRUCTION);
+    response.push_str(messages::MODEL_SWITCH_INSTRUCTION);
     let _ = room.send_markdown(&response).await;
 }
 
@@ -270,18 +270,18 @@ pub async fn handle_model(state: Arc<Mutex<BotState>>, argument: &str, room: &im
         bot_state.save();
         let _ = room
             .send_markdown(
-                    &crate::strings::messages::model_set(&model),
+                    &messages::model_set(&model),
             )
             .await;
     } else if argument.is_empty() {
         room_state.active_model = None;
         bot_state.save();
         let _ = room
-            .send_markdown(crate::strings::messages::MODEL_RESET)
+            .send_markdown(messages::MODEL_RESET)
             .await;
     } else {
         let _ = room
-            .send_markdown(crate::strings::messages::INVALID_MODEL)
+            .send_markdown(messages::INVALID_MODEL)
             .await;
     }
 }

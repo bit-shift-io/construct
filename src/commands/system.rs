@@ -108,6 +108,7 @@ pub fn validate_file_operation(command: &str, sandbox_root: &str) -> Result<(), 
 
 /// Validate that a path doesn't escape the sandbox
 fn validate_path(path: &str, sandbox_root: &str) -> Result<(), String> {
+    use crate::strings::messages;
     use std::path::Path;
 
     // Skip validation for flags and options
@@ -126,7 +127,7 @@ fn validate_path(path: &str, sandbox_root: &str) -> Result<(), String> {
     match std::fs::canonicalize(&full_path) {
         Ok(canon) => {
             if !canon.starts_with(sandbox_root) {
-                return Err(crate::strings::messages::sandbox_escape_error(path));
+                return Err(messages::sandbox_escape_error(path));
             }
         }
         Err(_) => {
@@ -134,7 +135,7 @@ fn validate_path(path: &str, sandbox_root: &str) -> Result<(), String> {
             if let Some(parent) = Path::new(&full_path).parent() {
                 if let Ok(canon_parent) = std::fs::canonicalize(parent) {
                     if !canon_parent.starts_with(sandbox_root) {
-                        return Err(crate::strings::messages::sandbox_escape_parent_error(path));
+                        return Err(messages::sandbox_escape_parent_error(path));
                     }
                 }
             }

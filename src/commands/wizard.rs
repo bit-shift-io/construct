@@ -1,15 +1,18 @@
+use crate::commands;
 use crate::core::config::AppConfig;
 use crate::core::feed::FeedManager;
-use crate::services::ChatService;
-use crate::core::state::{BotState, WizardMode, WizardState, WizardStep};
 use crate::core::feed_utils;
+use crate::core::state::{BotState, WizardMode, WizardState, WizardStep};
+use crate::mcp::McpManager;
+use crate::services::ChatService;
+use crate::strings::{prompts, wizard};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing;
 
 pub async fn start_new_project_wizard<S: ChatService + Clone + Send + 'static>(
     state: Arc<Mutex<BotState>>,
-    #[allow(unused_variables)] mcp_manager: Option<Arc<crate::mcp::McpManager>>,
+    #[allow(unused_variables)] mcp_manager: Option<Arc<McpManager>>,
     room: &S,
 ) {
     let (mut feed_manager, initial_msg) = {
@@ -57,7 +60,7 @@ pub async fn start_new_project_wizard<S: ChatService + Clone + Send + 'static>(
 
 pub async fn start_task_wizard<S: ChatService + Clone + Send + 'static>(
     state: Arc<Mutex<BotState>>,
-    #[allow(unused_variables)] mcp_manager: Option<Arc<crate::mcp::McpManager>>,
+    #[allow(unused_variables)] mcp_manager: Option<Arc<McpManager>>,
     room: &S,
 ) {
     let (mut feed_manager, initial_msg) = {
@@ -106,7 +109,7 @@ pub async fn start_task_wizard<S: ChatService + Clone + Send + 'static>(
 pub async fn handle_input<S: ChatService + Clone + Send + 'static>(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
-    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
+    mcp_manager: Option<Arc<McpManager>>,
     room: &S,
     input: &str,
 ) {
@@ -118,7 +121,7 @@ pub async fn handle_input<S: ChatService + Clone + Send + 'static>(
         room_state.feed_manager = None; // Clear feed
         bot_state.save();
         let _ = room
-            .send_markdown(crate::strings::wizard::CANCELLED)
+            .send_markdown(wizard::CANCELLED)
             .await;
         return;
     }
@@ -278,7 +281,7 @@ async fn render_step<S: ChatService + Clone + Send + 'static>(
 async fn finish_wizard<S: ChatService + Clone + Send + 'static>(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
-    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
+    mcp_manager: Option<Arc<McpManager>>,
     room: &S,
 ) {
     let mode = {
@@ -297,8 +300,8 @@ async fn finish_wizard<S: ChatService + Clone + Send + 'static>(
             desc
         };
 
-        let prompt = crate::strings::prompts::task_requirements_prompt(&desc);
-        crate::commands::handle_task(config, state.clone(), mcp_manager.clone(), &prompt, room)
+        let prompt = prompts::task_requirements_prompt(&desc);
+        commands::handle_task(config, state.clone(), mcp_manager.clone(), &prompt, room)
             .await;
         return;
     }
@@ -320,7 +323,7 @@ async fn finish_wizard<S: ChatService + Clone + Send + 'static>(
 
     // 1. Create Project Dir
     // Replaced create_new_project with handle_new
-    crate::commands::handle_new(config, state.clone(), mcp_manager.clone(), &name, room).await;
+    commands::handle_new(config, state.clone(), mcp_manager.clone(), &name, room).await;
 
     // Retrieve the just-created project path
     let (project_path, projects_dir) = {
@@ -357,8 +360,8 @@ async fn finish_wizard<S: ChatService + Clone + Send + 'static>(
     };
 
     // Construct the task arguments for the agent
-    let prompt = crate::strings::prompts::new_project_prompt(&name, &desc, &display_path);
+    let prompt = prompts::new_project_prompt(&name, &desc, &display_path);
 
     // 2. Start Task
-    crate::commands::handle_task(config, state.clone(), mcp_manager.clone(), &prompt, room).await;
+    commands::handle_task(config, state.clone(), mcp_manager.clone(), &prompt, room).await;
 }

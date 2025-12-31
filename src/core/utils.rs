@@ -68,11 +68,12 @@ pub fn log_actions(actions: &[AgentAction]) {
 
 /// Helper to run a shell command and return stdout/stderr.
 pub async fn run_command(command: &str, folder: Option<&str>) -> Result<String, String> {
+    use crate::strings::messages;
     use tokio::process::Command;
 
     let parts: Vec<&str> = command.split_whitespace().collect();
     if parts.is_empty() {
-        return Err(crate::strings::messages::EMPTY_COMMAND.to_string());
+        return Err(messages::EMPTY_COMMAND.to_string());
     }
 
     let binary = parts[0];
@@ -83,7 +84,7 @@ pub async fn run_command(command: &str, folder: Option<&str>) -> Result<String, 
         .current_dir(folder.unwrap_or("."))
         .output()
         .await
-        .map_err(|e| crate::strings::messages::command_run_failed(&e.to_string()))?;
+        .map_err(|e| messages::command_run_failed(&e.to_string()))?;
 
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -110,6 +111,7 @@ pub async fn run_shell_command_with_timeout(
     folder: Option<&str>,
     timeout: Option<std::time::Duration>,
 ) -> Result<String, String> {
+    use crate::strings::messages;
     use tokio::process::Command;
     use tokio::time::timeout as tokio_timeout;
 
@@ -140,12 +142,12 @@ pub async fn run_shell_command_with_timeout(
     let output = match result {
         Ok(Ok(output)) => output,
         Ok(Err(e)) => {
-            return Err(crate::strings::messages::shell_command_failed(
+            return Err(messages::shell_command_failed(
                 &e.to_string(),
             ));
         }
         Err(_) => {
-            return Err(crate::strings::messages::command_timed_out(timeout_duration));
+            return Err(messages::command_timed_out(timeout_duration));
         }
     };
 

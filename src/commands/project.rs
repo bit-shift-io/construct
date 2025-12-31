@@ -3,13 +3,18 @@ use crate::services::ChatService;
 use crate::core::state::BotState;
 use std::fs;
 use std::sync::Arc;
+use crate::commands::wizard;
+use crate::core::utils;
+use crate::mcp::McpManager;
+use crate::strings::messages;
+use crate::strings::prompts;
 use tokio::sync::Mutex;
 
 /// Entry point for .new command. STARTS the wizard if not internal.
 pub async fn handle_new<S: ChatService + Clone + Send + 'static>(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
-    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
+    mcp_manager: Option<Arc<McpManager>>,
     argument: &str,
     room: &S,
 ) {
@@ -21,7 +26,7 @@ pub async fn handle_new<S: ChatService + Clone + Send + 'static>(
         };
 
         if !wizard_active {
-            crate::commands::wizard::start_new_project_wizard(state.clone(), mcp_manager, room)
+            wizard::start_new_project_wizard(state.clone(), mcp_manager, room)
                 .await;
             return;
         }
@@ -33,7 +38,7 @@ pub async fn handle_new<S: ChatService + Clone + Send + 'static>(
         Some(dir) => dir,
         None => {
             let _ = room
-                .send_markdown(crate::strings::messages::NO_PROJECTS_CONFIGURED)
+                .send_markdown(messages::NO_PROJECTS_CONFIGURED)
                 .await;
             return;
         }
@@ -42,7 +47,7 @@ pub async fn handle_new<S: ChatService + Clone + Send + 'static>(
     let project_name = argument.trim();
     if project_name.is_empty() {
         let _ = room
-            .send_markdown(crate::strings::messages::PROVIDE_PROJECT_NAME)
+            .send_markdown(messages::PROVIDE_PROJECT_NAME)
             .await;
         return;
     }
@@ -50,7 +55,7 @@ pub async fn handle_new<S: ChatService + Clone + Send + 'static>(
     // Basic sanitization
     if project_name.contains('/') || project_name.contains('\\') || project_name.starts_with('.') {
         let _ = room
-            .send_markdown(crate::strings::messages::INVALID_PROJECT_NAME)
+            .send_markdown(messages::INVALID_PROJECT_NAME)
             .await;
         return;
     }
@@ -68,7 +73,7 @@ pub async fn handle_new<S: ChatService + Clone + Send + 'static>(
 
             let _ = room
                 .send_markdown(
-                        &crate::strings::messages::project_exists(&final_path),
+                        &messages::project_exists(&final_path),
                 )
                 .await;
             return;
@@ -93,7 +98,7 @@ pub async fn handle_new<S: ChatService + Clone + Send + 'static>(
 
     if let Err(e) = create_result {
         response.push_str(
-                &crate::strings::messages::create_dir_failed(&final_path, &e),
+                &messages::create_dir_failed(&final_path, &e),
         );
     } else {
         // Init specs
@@ -108,14 +113,14 @@ pub async fn handle_new<S: ChatService + Clone + Send + 'static>(
                 locked_client
                     .write_file(
                         &roadmap_path,
-                        crate::strings::prompts::ROADMAP_TEMPLATE,
+                        prompts::ROADMAP_TEMPLATE,
                     )
                     .await
                     .map_err(|e| e.to_string())
             } else {
                 fs::write(
                     &roadmap_path,
-                    crate::strings::prompts::ROADMAP_TEMPLATE,
+                    prompts::ROADMAP_TEMPLATE,
                 )
                 .map_err(|e| e.to_string())
             };
@@ -132,14 +137,14 @@ pub async fn handle_new<S: ChatService + Clone + Send + 'static>(
                 locked_client
                     .write_file(
                         &changelog_path,
-                        crate::strings::prompts::CHANGELOG_TEMPLATE,
+                        prompts::CHANGELOG_TEMPLATE,
                     )
                     .await
                     .map_err(|e| e.to_string())
             } else {
                 fs::write(
                     &changelog_path,
-                    crate::strings::prompts::CHANGELOG_TEMPLATE,
+                    prompts::CHANGELOG_TEMPLATE,
                 )
                 .map_err(|e| e.to_string())
             };
@@ -157,24 +162,24 @@ pub async fn handle_new<S: ChatService + Clone + Send + 'static>(
         bot_state.save();
 
         response.push_str(
-                &crate::strings::messages::project_created(&final_path),
+                &messages::project_created(&final_path),
         );
     }
 
-    response.push_str(crate::strings::messages::USE_TASK_TO_START);
+    response.push_str(messages::USE_TASK_TO_START);
     let _ = room.send_markdown(&response).await;
 }
 
 /// Lists available projects in the configured projects directory.
 pub async fn handle_list(
     config: &AppConfig,
-    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
+    mcp_manager: Option<Arc<McpManager>>,
     room: &impl ChatService,
 ) {
     let projects_dir = match &config.system.projects_dir {
         Some(dir) => dir,
         None => {
-            let _ = room.send_markdown(crate::strings::messages::NO_PROJECTS_CONFIGURED).await;
+            let _ = room.send_markdown(messages::NO_PROJECTS_CONFIGURED).await;
             return;
         }
     };
@@ -200,7 +205,7 @@ pub async fn handle_list(
             }
             Err(e) => {
                 let _ = room
-                    .send_markdown(&crate::strings::messages::list_projects_failed(&e.to_string()))
+                    .send_markdown(&messages::list_projects_failed(&e.to_string()))
                     .await;
                 return;
             }
@@ -225,7 +230,7 @@ pub async fn handle_list(
             }
             Err(e) => {
                 let _ = room
-                    .send_markdown(&crate::strings::messages::list_projects_failed(&e.to_string()))
+                    .send_markdown(&messages::list_projects_failed(&e.to_string()))
                     .await;
                 return;
             }
@@ -236,10 +241,10 @@ pub async fn handle_list(
 
     if projects.is_empty() {
         let _ = room
-            .send_markdown(crate::strings::messages::NO_PROJECTS_FOUND)
+            .send_markdown(messages::NO_PROJECTS_FOUND)
             .await;
     } else {
-        let mut response = crate::strings::messages::AVAILABLE_PROJECTS_HEADER
+        let mut response = messages::AVAILABLE_PROJECTS_HEADER
             .to_string();
         for project in projects {
             response.push_str(&format!("* `{}`\n", project));
@@ -252,7 +257,7 @@ pub async fn handle_list(
 pub async fn handle_project(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
-    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
+    mcp_manager: Option<Arc<McpManager>>,
     argument: &str,
     room: &impl ChatService,
 ) {
@@ -263,10 +268,10 @@ pub async fn handle_project(
         let room_state = bot_state.get_room_state(&room_id);
         let resp = match &room_state.current_project_path {
             Some(path) => {
-                let name = crate::core::utils::get_project_name(path);
+                let name = utils::get_project_name(path);
                 format!("📂 **Current project**: `{}`", name)
             }
-            None => crate::strings::messages::NO_PROJECT_SET.to_string(),
+            None => messages::NO_PROJECT_SET.to_string(),
         };
         let _ = room.send_markdown(&resp).await;
         return;
@@ -304,11 +309,11 @@ pub async fn handle_project(
         bot_state.save();
 
         let _ = room
-            .send_markdown(&crate::strings::messages::project_set_to(&path))
+            .send_markdown(&messages::project_set_to(&path))
             .await;
     } else {
         let _ = room
-            .send_markdown(&crate::strings::messages::path_not_dir(&path))
+            .send_markdown(&messages::path_not_dir(&path))
             .await;
     }
 }
@@ -316,13 +321,13 @@ pub async fn handle_project(
 /// Reads one or more files and prints their contents.
 pub async fn handle_read(
     state: Arc<Mutex<BotState>>,
-    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
+    mcp_manager: Option<Arc<McpManager>>,
     argument: &str,
     room: &impl ChatService,
 ) {
     if argument.is_empty() {
         let _ = room
-            .send_markdown(crate::strings::messages::SPECIFY_FILES_READ)
+            .send_markdown(messages::SPECIFY_FILES_READ)
             .await;
         return;
     }
@@ -353,10 +358,10 @@ pub async fn handle_read(
 
         match read_result {
             Ok(content) => {
-                response.push_str(&crate::strings::messages::file_content_header(file, &content));
+                response.push_str(&messages::file_content_header(file, &content));
             }
             Err(e) => {
-                response.push_str(&crate::strings::messages::read_file_error(file, &e));
+                response.push_str(&messages::read_file_error(file, &e));
             }
         }
     }
@@ -368,7 +373,7 @@ pub async fn handle_read(
 pub async fn handle_set(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
-    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
+    mcp_manager: Option<Arc<McpManager>>,
     argument: &str,
     room: &impl ChatService,
 ) {
@@ -378,7 +383,7 @@ pub async fn handle_set(
 
     if key.is_empty() || value.is_empty() {
         let _ = room
-            .send_markdown(crate::strings::messages::SET_USAGE)
+            .send_markdown(messages::SET_USAGE)
             .await;
         return;
     }
@@ -392,13 +397,13 @@ pub async fn handle_set(
             bot_state.save();
             let _ = room
                 .send_markdown(
-                        &crate::strings::messages::model_set(value),
+                        &messages::model_set(value),
                 )
                 .await;
         }
         _ => {
             let _ = room
-                .send_markdown(&crate::strings::messages::unknown_set_variable(key))
+                .send_markdown(&messages::unknown_set_variable(key))
                 .await;
         }
     }
