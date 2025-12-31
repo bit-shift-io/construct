@@ -174,7 +174,7 @@ pub async fn handle_list(
     let projects_dir = match &config.system.projects_dir {
         Some(dir) => dir,
         None => {
-            let _ = room.send_markdown("⚠️ No `projects_dir` configured.").await;
+            let _ = room.send_markdown(crate::strings::messages::NO_PROJECTS_CONFIGURED).await;
             return;
         }
     };
@@ -200,7 +200,7 @@ pub async fn handle_list(
             }
             Err(e) => {
                 let _ = room
-                    .send_markdown(&format!("⚠️ Failed to list projects: {}", e))
+                    .send_markdown(&crate::strings::messages::list_projects_failed(&e.to_string()))
                     .await;
                 return;
             }
@@ -225,7 +225,7 @@ pub async fn handle_list(
             }
             Err(e) => {
                 let _ = room
-                    .send_markdown(&format!("⚠️ Failed to list projects: {}", e))
+                    .send_markdown(&crate::strings::messages::list_projects_failed(&e.to_string()))
                     .await;
                 return;
             }
@@ -266,7 +266,7 @@ pub async fn handle_project(
                 let name = crate::core::utils::get_project_name(path);
                 format!("📂 **Current project**: `{}`", name)
             }
-            None => "📂 **No project set**. Use `.project _path_`".to_string(),
+            None => crate::strings::messages::NO_PROJECT_SET.to_string(),
         };
         let _ = room.send_markdown(&resp).await;
         return;
@@ -304,14 +304,11 @@ pub async fn handle_project(
         bot_state.save();
 
         let _ = room
-            .send_markdown(&format!("📂 **Project info set to**: `{}`", path))
+            .send_markdown(&crate::strings::messages::project_set_to(&path))
             .await;
     } else {
         let _ = room
-            .send_markdown(&format!(
-                "⚠️ `{}` is not a directory or does not exist.",
-                path
-            ))
+            .send_markdown(&crate::strings::messages::path_not_dir(&path))
             .await;
     }
 }
@@ -325,7 +322,7 @@ pub async fn handle_read(
 ) {
     if argument.is_empty() {
         let _ = room
-            .send_markdown("⚠️ **Please specify files**: `.read _file1_ _file2_`")
+            .send_markdown(crate::strings::messages::SPECIFY_FILES_READ)
             .await;
         return;
     }
@@ -356,10 +353,10 @@ pub async fn handle_read(
 
         match read_result {
             Ok(content) => {
-                response.push_str(&format!("**📄 `{}`**\n```\n{}\n```\n\n", file, content));
+                response.push_str(&crate::strings::messages::file_content_header(file, &content));
             }
             Err(e) => {
-                response.push_str(&format!("❌ Failed to read `{}`: {}\n\n", file, e));
+                response.push_str(&crate::strings::messages::read_file_error(file, &e));
             }
         }
     }
@@ -381,7 +378,7 @@ pub async fn handle_set(
 
     if key.is_empty() || value.is_empty() {
         let _ = room
-            .send_markdown("⚠️ **Usage**: `.set _key_ _value_`")
+            .send_markdown(crate::strings::messages::SET_USAGE)
             .await;
         return;
     }
@@ -401,10 +398,7 @@ pub async fn handle_set(
         }
         _ => {
             let _ = room
-                .send_markdown(&format!(
-                    "⚠️ Unknown variable `{}`. Supported: `project`, `agent`",
-                    key
-                ))
+                .send_markdown(&crate::strings::messages::unknown_set_variable(key))
                 .await;
         }
     }

@@ -1,7 +1,7 @@
 use crate::commands::agent::resolve_agent_name;
 use crate::core::config::AppConfig;
 use crate::core::feed::FeedManager;
-use crate::llm::{Client, Context, Message, MessageRole, Provider};
+use crate::llm::{Client, Context};
 use crate::core::state::BotState;
 use crate::core::utils;
 use crate::services::ChatService;
@@ -161,7 +161,7 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
     let system_prompt = crate::strings::prompts::SYSTEM;
     let room_clone = room.clone();
 
-    let (abort_tx, abort_rx) = watch::channel(false);
+    let (abort_tx, _abort_rx) = watch::channel(false);
     {
         let mut bot_state = state.lock().await;
         let room_state = bot_state.get_room_state(&room.room_id());

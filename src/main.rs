@@ -1,14 +1,10 @@
 #![recursion_limit = "256"]
-
 mod commands;
 mod core;
 mod llm;
 mod mcp;
 mod patterns;
-#[cfg(feature = "redis")]
-mod redis;
 mod services;
-
 mod strings;
 
 use anyhow::{Context, Result};
@@ -32,8 +28,8 @@ use tracing_subscriber;
 
 use crate::core::bridge::BridgeManager;
 use crate::core::config::AppConfig;
-use crate::services::matrix::MatrixService;
 use crate::core::state::BotState;
+use crate::services::matrix::MatrixService;
 use std::time::SystemTime;
 
 /// Static configuration and state managers.
@@ -74,7 +70,7 @@ async fn main() -> Result<()> {
     // Clear agent.log on startup for fresh debugging session
     let _ = fs::write(
         "data/agent.log",
-            crate::strings::logs::agent_session_start(&chrono::Local::now().to_rfc3339())
+        crate::strings::logs::agent_session_start(&chrono::Local::now().to_rfc3339()),
     );
 
     // 2. Initialize global state and manager
@@ -90,13 +86,13 @@ async fn main() -> Result<()> {
     {
         Ok(manager) => {
             tracing::info!(
-                "MCP sidecar started successfully with allowed directories: {:?}",
-                config.mcp.allowed_directories
+                "{}",
+                crate::strings::logs::mcp_started(&config.mcp.allowed_directories)
             );
             Some(Arc::new(manager))
         }
         Err(e) => {
-            tracing::error!("Failed to start MCP sidecar: {}", e);
+            tracing::error!("{}", crate::strings::logs::mcp_failed(&e.to_string()));
             tracing::warn!("{}", crate::strings::logs::MCP_START_FAIL_WARN);
             None
         }
@@ -113,7 +109,10 @@ async fn main() -> Result<()> {
     CONFIG.set(config.clone()).ok();
     BRIDGE_MANAGER.set(bridge_manager).ok();
 
-    tracing::info!("{}", crate::strings::logs::config_loaded(&config.services.matrix.username));
+    tracing::info!(
+        "{}",
+        crate::strings::logs::config_loaded(&config.services.matrix.username)
+    );
 
     // 3. Setup Matrix Client
 
@@ -137,9 +136,15 @@ async fn main() -> Result<()> {
 
     // 5. Update Display Name if configured
     if let Some(display_name) = &config.services.matrix.display_name {
-        tracing::info!("{}", crate::strings::logs::setting_display_name(display_name));
+        tracing::info!(
+            "{}",
+            crate::strings::logs::setting_display_name(display_name)
+        );
         if let Err(e) = client.account().set_display_name(Some(display_name)).await {
-            tracing::error!("{}", crate::strings::logs::set_display_name_fail(&e.to_string()));
+            tracing::error!(
+                "{}",
+                crate::strings::logs::set_display_name_fail(&e.to_string())
+            );
         }
     }
 
@@ -226,10 +231,7 @@ async fn setup_bridges(
                         if let Err(e) = client.join_room_by_id(&room_id).await {
                             tracing::error!(
                                 "{}",
-                                crate::strings::logs::bridge_join_fail(
-                                    room_id_str,
-                                    &e.to_string()
-                                )
+                                crate::strings::logs::bridge_join_fail(room_id_str, &e.to_string())
                             );
                         } else if let Some(room) = client.get_room(&room_id) {
                             tracing::info!(

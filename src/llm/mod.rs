@@ -39,7 +39,7 @@ pub mod providers;
 mod types;
 
 pub use client::Client;
-pub use providers::{ProviderConfig, chat};
+
 pub use types::{
-    CacheConfig, Context, Error, Message, MessageRole, Provider, Response, TokenUsage,
+    Context, Error, Message, MessageRole, Provider, Response, TokenUsage,
 };

@@ -224,3 +224,39 @@ pub fn sandbox_escape_error(path: &str) -> String {
 pub fn sandbox_escape_parent_error(path: &str) -> String {
     format!("Path '{}' would escape sandbox boundary", path)
 }
+
+pub fn list_projects_failed(err: &str) -> String {
+    format!("⚠️ Failed to list projects: {err}")
+}
+
+pub const NO_PROJECT_SET: &str = "📂 **No project set**. Use `.project _path_`";
+
+pub fn project_set_to(path: &str) -> String {
+    format!("📂 **Project info set to**: `{path}`")
+}
+
+pub fn path_not_dir(path: &str) -> String {
+    format!("⚠️ `{path}` is not a directory or does not exist.")
+}
+
+pub const SPECIFY_FILES_READ: &str = "⚠️ **Please specify files**: `.read _file1_ _file2_`";
+
+pub fn file_content_header(file: &str, content: &str) -> String {
+    format!("**📄 `{file}`**\n```\n{content}\n```\n\n")
+}
+
+pub fn read_file_error(file: &str, err: &str) -> String {
+    format!("❌ Failed to read `{file}`: {err}\n\n")
+}
+
+pub const SET_USAGE: &str = "⚠️ **Usage**: `.set _key_ _value_`";
+
+pub fn unknown_set_variable(var: &str) -> String {
+    format!("⚠️ Unknown variable `{var}`. Supported: `project`, `agent`")
+}
+
+pub const EMPTY_COMMAND: &str = "Empty command";
+
+pub fn command_timed_out(duration: std::time::Duration) -> String {
+    format!("Command timed out after {duration:?}. Consider breaking this into smaller steps or running in the background.")
+}

@@ -52,3 +52,14 @@ pub const MCP_START_FAIL_WARN: &str = "Continuing without MCP - admin commands w
 pub fn agent_session_start(timestamp: &str) -> String {
     format!("--- [{}] Agent session started ---\n\n", timestamp)
 }
+
+
+pub fn mcp_started(dirs: &[String]) -> String {
+    format!("MCP sidecar started successfully with allowed directories: {:?}", dirs)
+}
+
+pub const MCP_FAILED: &str = "Failed to start MCP sidecar: {}";
+
+pub fn mcp_failed(error: &str) -> String {
+    MCP_FAILED.replace("{}", error)
+}

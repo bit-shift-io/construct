@@ -52,7 +52,7 @@ impl ProviderConfig {
         let protocol = provider.as_str();
 
         // Try to find matching agent config
-        for (name, agent_config) in &app_config.agents {
+        for (_name, agent_config) in &app_config.agents {
             if agent_config.provider == protocol {
                 return Self::from_agent_config(agent_config);
             }

@@ -65,7 +65,7 @@ impl PatternRegistry {
         }
 
         // Deduplicate by error_type while keeping highest confidence
-        self.deduplicate_patterns(all_patterns)
+        self.match_patterns(all_patterns)
     }
 
     /// Detect patterns only for specific language (performance optimization)
@@ -87,11 +87,11 @@ impl PatternRegistry {
                 .detect_patterns(output),
         );
 
-        self.deduplicate_patterns(patterns)
+        self.match_patterns(patterns)
     }
 
     /// Deduplicate patterns, keeping highest confidence for each error_type
-    fn deduplicate_patterns(&self, mut patterns: Vec<ErrorPattern>) -> Vec<ErrorPattern> {
+    pub fn match_patterns(&self, patterns: Vec<ErrorPattern>) -> Vec<ErrorPattern> {
         use std::collections::HashMap;
 
         let mut best_patterns: HashMap<String, ErrorPattern> = HashMap::new();

@@ -72,7 +72,7 @@ pub async fn run_command(command: &str, folder: Option<&str>) -> Result<String, 
 
     let parts: Vec<&str> = command.split_whitespace().collect();
     if parts.is_empty() {
-        return Err("Empty command".to_string());
+        return Err(crate::strings::messages::EMPTY_COMMAND.to_string());
     }
 
     let binary = parts[0];
@@ -145,10 +145,7 @@ pub async fn run_shell_command_with_timeout(
             ));
         }
         Err(_) => {
-            return Err(format!(
-                "Command timed out after {:?}. Consider breaking this into smaller steps or running in the background.",
-                timeout_duration
-            ));
+            return Err(crate::strings::messages::command_timed_out(timeout_duration));
         }
     };
 
