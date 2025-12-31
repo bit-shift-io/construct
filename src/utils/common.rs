@@ -83,12 +83,7 @@ pub async fn run_command(command: &str, folder: Option<&str>) -> Result<String, 
         .current_dir(folder.unwrap_or("."))
         .output()
         .await
-        .map_err(|e| {
-            crate::strings::STRINGS
-                .messages
-                .command_run_failed
-                .replace("{}", &e.to_string())
-        })?;
+        .map_err(|e| crate::strings::messages::command_run_failed(&e.to_string()))?;
 
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -145,10 +140,9 @@ pub async fn run_shell_command_with_timeout(
     let output = match result {
         Ok(Ok(output)) => output,
         Ok(Err(e)) => {
-            return Err(crate::strings::STRINGS
-                .messages
-                .shell_command_failed
-                .replace("{}", &e.to_string()));
+            return Err(crate::strings::messages::shell_command_failed(
+                &e.to_string(),
+            ));
         }
         Err(_) => {
             return Err(format!(

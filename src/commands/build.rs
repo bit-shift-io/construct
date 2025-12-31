@@ -17,7 +17,7 @@ pub async fn handle_build(
     let working_dir = room_state.current_project_path.as_deref();
 
     let _ = room
-        .send_markdown(&crate::strings::STRINGS.messages.building_msg)
+        .send_markdown(crate::strings::messages::BUILDING_MSG)
         .await;
 
     let response = if let Some(mcp) = &mcp_manager {
@@ -42,10 +42,7 @@ pub async fn handle_build(
 
     let _ = room
         .send_markdown(
-            &crate::strings::STRINGS
-                .messages
-                .build_result
-                .replace("{}", &response),
+                &crate::strings::messages::build_result(&response),
         )
         .await;
 }
@@ -64,7 +61,7 @@ pub async fn handle_deploy(
     let working_dir = room_state.current_project_path.as_deref();
 
     let _ = room
-        .send_markdown(&crate::strings::STRINGS.messages.deploying_msg)
+        .send_markdown(crate::strings::messages::DEPLOYING_MSG)
         .await;
 
     let response = if let Some(mcp) = &mcp_manager {
@@ -89,10 +86,7 @@ pub async fn handle_deploy(
 
     let _ = room
         .send_markdown(
-            &crate::strings::STRINGS
-                .messages
-                .deploy_result
-                .replace("{}", &response),
+                &crate::strings::messages::deploy_result(&response),
         )
         .await;
 }
@@ -110,7 +104,7 @@ pub async fn handle_check(
     let working_dir = room_state.current_project_path.as_deref();
 
     let _ = room
-        .send_markdown(&crate::strings::STRINGS.messages.checking_msg)
+        .send_markdown(crate::strings::messages::CHECKING_MSG)
         .await;
 
     let response = if let Some(mcp) = &mcp_manager {
@@ -135,10 +129,7 @@ pub async fn handle_check(
 
     let _ = room
         .send_markdown(
-            &crate::strings::STRINGS
-                .messages
-                .check_result
-                .replace("{}", &response),
+                &crate::strings::messages::check_result(&response),
         )
         .await;
 }

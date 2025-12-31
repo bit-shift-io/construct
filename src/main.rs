@@ -77,18 +77,15 @@ async fn main() -> Result<()> {
 
     // 1. Initial configuration loading
     let config_content =
-        fs::read_to_string("data/config.yaml").context("Failed to read data/config.yaml")?;
+        fs::read_to_string("data/config.yaml").context(crate::strings::logs::CONFIG_READ_ERROR)?;
 
     let config: AppConfig =
-        serde_yaml::from_str(&config_content).context("Failed to parse YAML")?;
+        serde_yaml::from_str(&config_content).context(crate::strings::logs::CONFIG_PARSE_ERROR)?;
 
     // Clear agent.log on startup for fresh debugging session
     let _ = fs::write(
         "data/agent.log",
-        format!(
-            "--- [{}] Agent session started ---\n\n",
-            chrono::Local::now().to_rfc3339()
-        ),
+            crate::strings::logs::agent_session_start(&chrono::Local::now().to_rfc3339())
     );
 
     // 2. Initialize global state and manager
@@ -111,7 +108,7 @@ async fn main() -> Result<()> {
         }
         Err(e) => {
             tracing::error!("Failed to start MCP sidecar: {}", e);
-            tracing::warn!("Continuing without MCP - admin commands will still work");
+            tracing::warn!("{}", crate::strings::logs::MCP_START_FAIL_WARN);
             None
         }
     };
@@ -127,13 +124,7 @@ async fn main() -> Result<()> {
     CONFIG.set(config.clone()).ok();
     BRIDGE_MANAGER.set(bridge_manager).ok();
 
-    tracing::info!(
-        "{}",
-        crate::strings::STRINGS
-            .logs
-            .config_loaded
-            .replace("{}", &config.services.matrix.username)
-    );
+    tracing::info!("{}", crate::strings::logs::config_loaded(&config.services.matrix.username));
 
     // 3. Setup Matrix Client
 
@@ -153,25 +144,13 @@ async fn main() -> Result<()> {
         .send()
         .await?;
 
-    tracing::info!("{}", crate::strings::STRINGS.logs.login_success);
+    tracing::info!("{}", crate::strings::logs::LOGIN_SUCCESS);
 
     // 5. Update Display Name if configured
     if let Some(display_name) = &config.services.matrix.display_name {
-        tracing::info!(
-            "{}",
-            crate::strings::STRINGS
-                .logs
-                .setting_display_name
-                .replace("{}", display_name)
-        );
+        tracing::info!("{}", crate::strings::logs::setting_display_name(display_name));
         if let Err(e) = client.account().set_display_name(Some(display_name)).await {
-            tracing::error!(
-                "{}",
-                crate::strings::STRINGS
-                    .logs
-                    .set_display_name_fail
-                    .replace("{}", &e.to_string())
-            );
+            tracing::error!("{}", crate::strings::logs::set_display_name_fail(&e.to_string()));
         }
     }
 
@@ -219,15 +198,9 @@ async fn main() -> Result<()> {
     // 6. Start Sync Loop
     let sync_client = client.clone();
     let sync_handle = tokio::spawn(async move {
-        tracing::info!("{}", crate::strings::STRINGS.logs.sync_loop_start);
+        tracing::info!("{}", crate::strings::logs::SYNC_LOOP_START);
         if let Err(e) = sync_client.sync(SyncSettings::default()).await {
-            tracing::error!(
-                "{}",
-                crate::strings::STRINGS
-                    .logs
-                    .sync_loop_fail
-                    .replace("{}", &e.to_string())
-            );
+            tracing::error!("{}", crate::strings::logs::sync_loop_fail(&e.to_string()));
         }
     });
 
@@ -236,14 +209,8 @@ async fn main() -> Result<()> {
 
     // 8. Graceful Shutdown
     match tokio::signal::ctrl_c().await {
-        Ok(()) => tracing::info!("{}", crate::strings::STRINGS.logs.shutdown),
-        Err(err) => tracing::error!(
-            "{}",
-            crate::strings::STRINGS
-                .logs
-                .shutdown_fail
-                .replace("{}", &err.to_string())
-        ),
+        Ok(()) => tracing::info!("{}", crate::strings::logs::SHUTDOWN),
+        Err(err) => tracing::error!("{}", crate::strings::logs::shutdown_fail(&err.to_string())),
     }
 
     sync_handle.abort();
@@ -263,30 +230,22 @@ async fn setup_bridges(
                 if let Some(room_id_str) = &entry.channel {
                     tracing::info!(
                         "{}",
-                        crate::strings::STRINGS
-                            .logs
-                            .bridge_joining
-                            .replace("{}", bridge_name)
-                            .replace("{}", room_id_str)
+                        crate::strings::logs::bridge_joining(bridge_name, room_id_str)
                     );
 
                     if let Ok(room_id) = RoomId::parse(room_id_str) {
                         if let Err(e) = client.join_room_by_id(&room_id).await {
                             tracing::error!(
                                 "{}",
-                                crate::strings::STRINGS
-                                    .logs
-                                    .bridge_join_fail
-                                    .replace("{}", room_id_str)
-                                    .replace("{}", &e.to_string())
+                                crate::strings::logs::bridge_join_fail(
+                                    room_id_str,
+                                    &e.to_string()
+                                )
                             );
                         } else if let Some(room) = client.get_room(&room_id) {
                             tracing::info!(
                                 "{}",
-                                crate::strings::STRINGS
-                                    .logs
-                                    .bridge_join_success
-                                    .replace("{}", room_id_str)
+                                crate::strings::logs::bridge_join_success(room_id_str)
                             );
 
                             // Send status message instead of welcome message
@@ -311,21 +270,12 @@ async fn handle_invites(event: StrippedRoomMemberEvent, room: Room) {
     if event.content.membership == MembershipState::Invite {
         tracing::info!(
             "{}",
-            crate::strings::STRINGS
-                .logs
-                .invite_received
-                .replace("{}", &format!("{:?}", room.room_id()))
+            crate::strings::logs::invite_received(&format!("{:?}", room.room_id()))
         );
         if let Err(e) = room.join().await {
-            tracing::error!(
-                "{}",
-                crate::strings::STRINGS
-                    .logs
-                    .join_invite_fail
-                    .replace("{}", &e.to_string())
-            );
+            tracing::error!("{}", crate::strings::logs::join_invite_fail(&e.to_string()));
         } else {
-            tracing::info!("{}", crate::strings::STRINGS.logs.join_invite_success);
+            tracing::info!("{}", crate::strings::logs::JOIN_INVITE_SUCCESS);
         }
     }
 }

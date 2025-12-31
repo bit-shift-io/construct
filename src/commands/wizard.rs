@@ -118,7 +118,7 @@ pub async fn handle_input<S: ChatService + Clone + Send + 'static>(
         room_state.feed_manager = None; // Clear feed
         bot_state.save();
         let _ = room
-            .send_markdown(&crate::strings::STRINGS.wizard.cancelled)
+            .send_markdown(crate::strings::wizard::CANCELLED)
             .await;
         return;
     }
@@ -297,10 +297,7 @@ async fn finish_wizard<S: ChatService + Clone + Send + 'static>(
             desc
         };
 
-        let prompt = crate::strings::STRINGS
-            .prompts
-            .task_requirements_prompt
-            .replace("{}", &desc);
+        let prompt = crate::strings::prompts::task_requirements_prompt(&desc);
         crate::commands::handle_task(config, state.clone(), mcp_manager.clone(), &prompt, room)
             .await;
         return;
@@ -360,12 +357,7 @@ async fn finish_wizard<S: ChatService + Clone + Send + 'static>(
     };
 
     // Construct the task arguments for the agent
-    let prompt = crate::strings::STRINGS
-        .prompts
-        .new_project_prompt
-        .replace("{NAME}", &name)
-        .replace("{REQUIREMENTS}", &desc)
-        .replace("{WORKDIR}", &display_path);
+    let prompt = crate::strings::prompts::new_project_prompt(&name, &desc, &display_path);
 
     // 2. Start Task
     crate::commands::handle_task(config, state.clone(), mcp_manager.clone(), &prompt, room).await;

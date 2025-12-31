@@ -109,15 +109,12 @@ pub async fn handle_agent(
             bot_state.save();
             let _ = room
                 .send_markdown(
-                    &crate::strings::STRINGS
-                        .messages
-                        .model_set
-                        .replace("{}", &agent_name),
+                        &crate::strings::messages::model_set(&agent_name),
                 )
                 .await;
             return;
         } else {
-            let _ = room.send_markdown("⚠️ Invalid agent selection.").await;
+            let _ = room.send_markdown(crate::strings::messages::INVALID_AGENT_SELECTION).await;
             // Fallthrough to show list? Or return?
             // Let's show list to be helpful
         }
@@ -139,10 +136,10 @@ pub async fn handle_agent(
     let _ = room_state;
     bot_state.save();
 
-    let mut response = "**🤖 Available Agents**\n\n".to_string();
+    let mut response = crate::strings::messages::AVAILABLE_AGENTS_HEADER.to_string();
 
     if final_list.is_empty() {
-        response.push_str("No agents available.\n");
+        response.push_str(crate::strings::messages::NO_AGENTS_AVAILABLE);
     } else {
         for (idx, name) in final_list.iter().enumerate() {
             let marker = if name == &current_agent { "✅" } else { "" };
@@ -150,7 +147,7 @@ pub async fn handle_agent(
         }
     }
 
-    response.push_str("\nUse `.agent <name|number>` to switch.");
+    response.push_str(crate::strings::messages::AGENT_SWITCH_INSTRUCTION);
     let _ = room.send_markdown(&response).await;
 }
 
@@ -183,7 +180,7 @@ pub async fn handle_models(
             .unwrap_or("auto")
             .to_string();
 
-        (format!("**🤖 Models for Agent: {}**\n\n", active), active)
+        (crate::strings::messages::models_header(&active), active)
     };
 
     // Find the config for this agent
@@ -200,7 +197,7 @@ pub async fn handle_models(
 
     let Some(cfg) = agent_config else {
         let _ = room
-            .send_markdown("⚠️ Active agent configuration not found.")
+            .send_markdown(crate::strings::messages::ACTIVE_AGENT_CONFIG_NOT_FOUND)
             .await;
         return;
     };
@@ -235,7 +232,7 @@ pub async fn handle_models(
         bot_state.save();
 
         if model_list.is_empty() {
-            response.push_str("No models found or discovery not supported for this agent.\n");
+            response.push_str(crate::strings::messages::NO_MODELS_FOUND);
         } else {
             for (idx, name) in model_list.iter().enumerate() {
                 let marker = if name == &current_model { "✅" } else { "" };
@@ -244,7 +241,7 @@ pub async fn handle_models(
         }
     }
 
-    response.push_str("\nUse `.model <name|number>` to switch active model.");
+    response.push_str(crate::strings::messages::MODEL_SWITCH_INSTRUCTION);
     let _ = room.send_markdown(&response).await;
 }
 
@@ -272,21 +269,18 @@ pub async fn handle_model(state: Arc<Mutex<BotState>>, argument: &str, room: &im
         bot_state.save();
         let _ = room
             .send_markdown(
-                &crate::strings::STRINGS
-                    .messages
-                    .model_set
-                    .replace("{}", &model),
+                    &crate::strings::messages::model_set(&model),
             )
             .await;
     } else if argument.is_empty() {
         room_state.active_model = None;
         bot_state.save();
         let _ = room
-            .send_markdown(&crate::strings::STRINGS.messages.model_reset)
+            .send_markdown(crate::strings::messages::MODEL_RESET)
             .await;
     } else {
         let _ = room
-            .send_markdown(&crate::strings::STRINGS.messages.invalid_model)
+            .send_markdown(crate::strings::messages::INVALID_MODEL)
             .await;
     }
 }
@@ -323,7 +317,7 @@ pub async fn handle_ask<S: ChatService + Clone + Send + 'static>(
         let state_clone = state.clone();
 
         // Build enhanced prompt with project context
-        let system_prompt = crate::strings::STRINGS.prompts.system;
+        let system_prompt = crate::strings::prompts::SYSTEM;
 
         let mut project_context = String::new();
         let mut execution_history = String::new();

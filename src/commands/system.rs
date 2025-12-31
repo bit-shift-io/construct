@@ -126,7 +126,7 @@ fn validate_path(path: &str, sandbox_root: &str) -> Result<(), String> {
     match std::fs::canonicalize(&full_path) {
         Ok(canon) => {
             if !canon.starts_with(sandbox_root) {
-                return Err(format!("Path '{}' escapes sandbox boundary", path));
+                return Err(crate::strings::messages::sandbox_escape_error(path));
             }
         }
         Err(_) => {
@@ -134,7 +134,7 @@ fn validate_path(path: &str, sandbox_root: &str) -> Result<(), String> {
             if let Some(parent) = Path::new(&full_path).parent() {
                 if let Ok(canon_parent) = std::fs::canonicalize(parent) {
                     if !canon_parent.starts_with(sandbox_root) {
-                        return Err(format!("Path '{}' would escape sandbox boundary", path));
+                        return Err(crate::strings::messages::sandbox_escape_parent_error(path));
                     }
                 }
             }

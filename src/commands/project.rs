@@ -33,7 +33,7 @@ pub async fn handle_new<S: ChatService + Clone + Send + 'static>(
         Some(dir) => dir,
         None => {
             let _ = room
-                .send_markdown(&crate::strings::STRINGS.messages.no_projects_configured)
+                .send_markdown(crate::strings::messages::NO_PROJECTS_CONFIGURED)
                 .await;
             return;
         }
@@ -42,7 +42,7 @@ pub async fn handle_new<S: ChatService + Clone + Send + 'static>(
     let project_name = argument.trim();
     if project_name.is_empty() {
         let _ = room
-            .send_markdown(&crate::strings::STRINGS.messages.provide_project_name)
+            .send_markdown(crate::strings::messages::PROVIDE_PROJECT_NAME)
             .await;
         return;
     }
@@ -50,7 +50,7 @@ pub async fn handle_new<S: ChatService + Clone + Send + 'static>(
     // Basic sanitization
     if project_name.contains('/') || project_name.contains('\\') || project_name.starts_with('.') {
         let _ = room
-            .send_markdown(&crate::strings::STRINGS.messages.invalid_project_name)
+            .send_markdown(crate::strings::messages::INVALID_PROJECT_NAME)
             .await;
         return;
     }
@@ -68,10 +68,7 @@ pub async fn handle_new<S: ChatService + Clone + Send + 'static>(
 
             let _ = room
                 .send_markdown(
-                    &crate::strings::STRINGS
-                        .messages
-                        .project_exists
-                        .replace("{}", &final_path),
+                        &crate::strings::messages::project_exists(&final_path),
                 )
                 .await;
             return;
@@ -96,11 +93,7 @@ pub async fn handle_new<S: ChatService + Clone + Send + 'static>(
 
     if let Err(e) = create_result {
         response.push_str(
-            &crate::strings::STRINGS
-                .messages
-                .create_dir_failed
-                .replace("{PATH}", &final_path)
-                .replace("{ERR}", &e),
+                &crate::strings::messages::create_dir_failed(&final_path, &e),
         );
     } else {
         // Init specs
@@ -115,14 +108,14 @@ pub async fn handle_new<S: ChatService + Clone + Send + 'static>(
                 locked_client
                     .write_file(
                         &roadmap_path,
-                        &crate::strings::STRINGS.prompts.roadmap_template,
+                        crate::strings::prompts::ROADMAP_TEMPLATE,
                     )
                     .await
                     .map_err(|e| e.to_string())
             } else {
                 fs::write(
                     &roadmap_path,
-                    &crate::strings::STRINGS.prompts.roadmap_template,
+                    crate::strings::prompts::ROADMAP_TEMPLATE,
                 )
                 .map_err(|e| e.to_string())
             };
@@ -139,14 +132,14 @@ pub async fn handle_new<S: ChatService + Clone + Send + 'static>(
                 locked_client
                     .write_file(
                         &changelog_path,
-                        &crate::strings::STRINGS.prompts.changelog_template,
+                        crate::strings::prompts::CHANGELOG_TEMPLATE,
                     )
                     .await
                     .map_err(|e| e.to_string())
             } else {
                 fs::write(
                     &changelog_path,
-                    &crate::strings::STRINGS.prompts.changelog_template,
+                    crate::strings::prompts::CHANGELOG_TEMPLATE,
                 )
                 .map_err(|e| e.to_string())
             };
@@ -164,14 +157,11 @@ pub async fn handle_new<S: ChatService + Clone + Send + 'static>(
         bot_state.save();
 
         response.push_str(
-            &crate::strings::STRINGS
-                .messages
-                .project_created
-                .replace("{}", &final_path),
+                &crate::strings::messages::project_created(&final_path),
         );
     }
 
-    response.push_str(&crate::strings::STRINGS.messages.use_task_to_start);
+    response.push_str(crate::strings::messages::USE_TASK_TO_START);
     let _ = room.send_markdown(&response).await;
 }
 
@@ -246,12 +236,10 @@ pub async fn handle_list(
 
     if projects.is_empty() {
         let _ = room
-            .send_markdown(&crate::strings::STRINGS.messages.no_projects_found)
+            .send_markdown(crate::strings::messages::NO_PROJECTS_FOUND)
             .await;
     } else {
-        let mut response = crate::strings::STRINGS
-            .messages
-            .available_projects_header
+        let mut response = crate::strings::messages::AVAILABLE_PROJECTS_HEADER
             .to_string();
         for project in projects {
             response.push_str(&format!("* `{}`\n", project));
@@ -407,10 +395,7 @@ pub async fn handle_set(
             bot_state.save();
             let _ = room
                 .send_markdown(
-                    &crate::strings::STRINGS
-                        .messages
-                        .model_set
-                        .replace("{}", value),
+                        &crate::strings::messages::model_set(value),
                 )
                 .await;
         }

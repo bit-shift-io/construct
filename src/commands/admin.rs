@@ -27,10 +27,7 @@ pub async fn handle_command(
     if !is_admin {
         let _ = room
             .send_markdown(
-                &crate::strings::STRINGS
-                    .messages
-                    .admin_permission_denied
-                    .replace("{}", sender),
+                &crate::strings::messages::admin_permission_denied(sender),
             )
             .await;
         return;
@@ -120,20 +117,19 @@ pub async fn handle_command(
 
                 let _ = room
                     .send_markdown(
-                        &crate::strings::STRINGS
-                            .messages
-                            .directory_changed
-                            .replace("{}", &canon.to_string_lossy()),
+                        &crate::strings::messages::directory_changed(
+                            &canon.to_string_lossy(),
+                        ),
                     )
                     .await;
             } else {
                 let _ = room
-                    .send_markdown(&crate::strings::STRINGS.messages.access_denied_sandbox)
+                    .send_markdown(crate::strings::messages::ACCESS_DENIED_SANDBOX)
                     .await;
             }
         } else {
             let _ = room
-                .send_markdown(&crate::strings::STRINGS.messages.directory_not_found)
+                .send_markdown(crate::strings::messages::DIRECTORY_NOT_FOUND)
                 .await;
         }
 
@@ -147,12 +143,9 @@ pub async fn handle_command(
     };
 
     let display_output = if output.trim().is_empty() {
-        crate::strings::STRINGS.messages.command_no_output
+        crate::strings::messages::COMMAND_NO_OUTPUT.to_string()
     } else {
-        &crate::strings::STRINGS
-            .messages
-            .code_block_output
-            .replace("{}", &output)
+        crate::strings::messages::code_block_output(&output)
     };
 
     let _ = room.send_markdown(&display_output).await;
@@ -177,10 +170,7 @@ pub async fn handle_cleanup<S: ChatService + Send + Sync>(
     if !is_admin {
         let _ = room
             .send_markdown(
-                &crate::strings::STRINGS
-                    .messages
-                    .admin_permission_denied
-                    .replace("{}", sender),
+                &crate::strings::messages::admin_permission_denied(sender),
             )
             .await;
         return;

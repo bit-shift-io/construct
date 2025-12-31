@@ -33,10 +33,7 @@ pub async fn handle_changes(
     };
     let _ = room
         .send_markdown(
-            &crate::strings::STRINGS
-                .messages
-                .current_changes_header
-                .replace("{}", &response),
+            &crate::strings::messages::current_changes_header(&response),
         )
         .await;
 }
@@ -54,7 +51,7 @@ pub async fn handle_commit(
     let working_dir = room_state.current_project_path.as_deref();
     if argument.is_empty() {
         let _ = room
-            .send_markdown(&crate::strings::STRINGS.messages.please_commit_msg)
+            .send_markdown(crate::strings::messages::PLEASE_COMMIT_MSG)
             .await;
     } else {
         // Note: Git command construction is internal info, kept as format!
@@ -79,10 +76,7 @@ pub async fn handle_commit(
         };
         let _ = room
             .send_markdown(
-                &crate::strings::STRINGS
-                    .messages
-                    .committed_msg
-                    .replace("{}", &resp),
+                &crate::strings::messages::committed_msg(&resp),
             )
             .await;
     }
@@ -110,6 +104,6 @@ pub async fn handle_discard(
         let _ = crate::utils::run_command("git checkout .", working_dir).await;
     }
     let _ = room
-        .send_markdown(&crate::strings::STRINGS.messages.changes_discarded)
+        .send_markdown(crate::strings::messages::CHANGES_DISCARDED)
         .await;
 }
