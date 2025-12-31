@@ -1,4 +1,4 @@
-use crate::core::features::feed::FeedManager;
+use crate::core::feed::FeedManager;
 use crate::services::ChatService;
 
 /// Send or edit a message in the feed.

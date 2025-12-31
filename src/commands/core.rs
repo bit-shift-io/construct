@@ -1,6 +1,6 @@
 use crate::commands::agent::resolve_agent_name;
 use crate::core::config::AppConfig;
-use crate::core::features::feed::FeedManager;
+use crate::core::feed::FeedManager;
 use crate::llm::{Client, Context, Message, MessageRole, Provider};
 use crate::core::state::BotState;
 use crate::core::utils;
@@ -261,7 +261,7 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
 
         // Add recent execution history to context
         let recent_history = if let Some(ref wd) = working_dir {
-            let state_manager = crate::core::state::project::ProjectStateManager::new(wd.clone());
+            let state_manager = crate::core::project::ProjectStateManager::new(wd.clone());
             state_manager.get_recent_history(5).unwrap_or_default()
         } else {
             String::new()
@@ -279,7 +279,7 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
         // Detect error patterns from past failures
         let mut error_patterns_context = String::new();
         if let Some(ref wd) = working_dir {
-            let state_manager = crate::core::state::project::ProjectStateManager::new(wd.clone());
+            let state_manager = crate::core::project::ProjectStateManager::new(wd.clone());
             if let Ok(patterns) = state_manager.detect_error_patterns() {
                 if !patterns.is_empty() {
                     error_patterns_context = state_manager.format_error_patterns(&patterns);
@@ -889,7 +889,7 @@ pub async fn handle_task<S: ChatService + Clone + Send + 'static>(
             }
 
             // Read state.md for execution history
-            let state_manager = crate::core::state::project::ProjectStateManager::new(wd.clone());
+            let state_manager = crate::core::project::ProjectStateManager::new(wd.clone());
             if let Ok(history) = state_manager.get_recent_history(10) {
                 if !history.contains("No execution history yet") {
                     execution_history = format!("\n\n### Recent Execution History\n{}\n", history);

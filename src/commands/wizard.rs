@@ -1,8 +1,8 @@
 use crate::core::config::AppConfig;
-use crate::core::features::feed::FeedManager;
+use crate::core::feed::FeedManager;
 use crate::services::ChatService;
 use crate::core::state::{BotState, WizardMode, WizardState, WizardStep};
-use crate::core::utils::feed_helper;
+use crate::core::feed_utils;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing;
@@ -32,7 +32,7 @@ pub async fn start_new_project_wizard<S: ChatService + Clone + Send + 'static>(
 
         bot_state.save();
 
-        let msg = feed_helper::format_wizard_step(
+        let msg = feed_utils::format_wizard_step(
             &WizardStep::ProjectName,
             &WizardMode::Project,
             "",
@@ -43,7 +43,7 @@ pub async fn start_new_project_wizard<S: ChatService + Clone + Send + 'static>(
     };
 
     // Send initial wizard message and store event ID
-    if let Err(e) = feed_helper::start_feed(room, &mut feed_manager, &initial_msg).await {
+    if let Err(e) = feed_utils::start_feed(room, &mut feed_manager, &initial_msg).await {
         tracing::error!("Failed to start feed: {}", e);
         return;
     }
@@ -80,7 +80,7 @@ pub async fn start_task_wizard<S: ChatService + Clone + Send + 'static>(
 
         bot_state.save();
 
-        let msg = feed_helper::format_wizard_step(
+        let msg = feed_utils::format_wizard_step(
             &WizardStep::TaskDescription,
             &WizardMode::Task,
             "",
@@ -91,7 +91,7 @@ pub async fn start_task_wizard<S: ChatService + Clone + Send + 'static>(
     };
 
     // Send initial wizard message and store event ID
-    if let Err(e) = feed_helper::start_feed(room, &mut feed_manager, &initial_msg).await {
+    if let Err(e) = feed_utils::start_feed(room, &mut feed_manager, &initial_msg).await {
         tracing::error!("Failed to start feed: {}", e);
         return;
     }
@@ -255,7 +255,7 @@ async fn render_step<S: ChatService + Clone + Send + 'static>(
         )
     };
 
-    let msg = feed_helper::format_wizard_step(
+    let msg = feed_utils::format_wizard_step(
         &step.unwrap_or(WizardStep::ProjectName),
         &mode,
         &buffer,
@@ -263,7 +263,7 @@ async fn render_step<S: ChatService + Clone + Send + 'static>(
     );
 
     // Update feed message (edit existing or send new)
-    if let Err(e) = feed_helper::update_feed_message(room, &mut feed_manager, &msg).await {
+    if let Err(e) = feed_utils::update_feed_message(room, &mut feed_manager, &msg).await {
         tracing::error!("Failed to update feed message: {}", e);
         return;
     }

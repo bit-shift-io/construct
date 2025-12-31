@@ -1,6 +1,6 @@
-pub mod project;
 
-use crate::core::features::feed::FeedManager;
+
+use crate::core::feed::FeedManager;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
