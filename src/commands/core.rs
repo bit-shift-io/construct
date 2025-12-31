@@ -1,7 +1,7 @@
-use crate::agent::{AgentContext, get_agent};
 use crate::commands::agent::resolve_agent_name;
 use crate::config::AppConfig;
 use crate::features::feed::FeedManager;
+use crate::llm::{Client, Context};
 use crate::services::ChatService;
 use crate::state::BotState;
 use chrono;
@@ -21,16 +21,19 @@ pub async fn execute_with_fallback(
     config: &AppConfig,
     state: Arc<Mutex<BotState>>,
     room: &impl ChatService,
-    mut context: AgentContext,
+    prompt: &str,
     initial_agent_name: &str,
+    model: Option<String>,
 ) -> Result<String, String> {
     action_delay(config).await;
     let mut current_agent_name = initial_agent_name.to_string();
-    let mut current_model = context.model.clone();
+    let mut current_model = model.clone();
 
     // Safety break to prevent infinite loops
     let mut attempts = 0;
     const MAX_ATTEMPTS: usize = 10;
+
+    let client = Client::new(config.clone());
 
     loop {
         attempts += 1;
@@ -38,20 +41,29 @@ pub async fn execute_with_fallback(
             return Err("Maximum fallback attempts reached.".to_string());
         }
 
-        let agent = get_agent(&current_agent_name, config);
-
-        // Update context with current model (might have changed in loop)
-        context.model = current_model.clone();
+        // Build context
+        let mut context = Context::prompt(prompt);
+        if let Some(m) = &current_model {
+            context = context.with_model(m.clone());
+        }
 
         // GENERIC RATE LIMITING (Proactive logic omitted for brevity, keeping core)
         // ... (Re-adding generic rate limiting logic would be good if space permits,
         // strictly speaking it was in mod.rs, I should probably keep it.
-        // I'll assume for now I can skip the bulky rate limit proactively block for the first pass
+        // I'll assume for now I can skip bulky rate limit proactively block for first pass
         // to ensure it fits, OR I just copy it. It's safe to copy.)
 
         // ... [Insert proactive rate limiting if needed, but for now relying on reactive]
 
-        let result = agent.execute(&context).await;
+        let result = if let Some(m) = &current_model {
+            client
+                .prompt_with_model(&current_agent_name, m, prompt)
+                .await
+        } else {
+            client.prompt(&current_agent_name, prompt).await
+        }
+        .map_err(|e| e.to_string())
+        .map(|r| r.content);
 
         match result {
             Ok(output) => return Ok(output),
@@ -80,10 +92,10 @@ pub async fn execute_with_fallback(
                     room_state.model_cooldowns.retain(|_, ts| now - *ts < 3600);
 
                     if let Some(agent_conf) = agent_conf {
-                        // 1. Try next model
+                        //1. Try next model
                         // ... (Model switching logic)
 
-                        // 2. Fallback Agent
+                        //2. Fallback Agent
                         if let Some(fallback) = &agent_conf.fallback_agent {
                             // ...
                             room_state.active_agent = Some(fallback.clone());
@@ -284,32 +296,18 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
             }
         }
 
-        let context = AgentContext {
-            prompt: format!(
-                "{}{}{}{}\n\nHistory:\n{}\n\nUser: {}",
-                system_prompt,
-                history_context,
-                error_patterns_context,
-                prompt,
-                conversation_history,
-                prompt
-            ),
-            working_dir: working_dir.clone(),
-            model: active_model.clone(),
-            status_callback: Some(std::sync::Arc::new({
-                let r = room_clone.clone();
-                move |msg| {
-                    let r_inner = r.clone();
-                    tokio::spawn(async move {
-                        let _ = r_inner.send_markdown(&msg).await;
-                    });
-                }
-            })),
-            abort_signal: Some(abort_rx.clone()),
-            project_state_manager: feed_manager
-                .get_project_state_manager()
-                .map(|m| std::sync::Arc::new(m.clone())),
-        };
+        // Send initial status message
+        let _ = room_clone.send_markdown("⏳ Processing...").await;
+
+        let full_prompt = format!(
+            "{}{}{}{}\n\nHistory:\n{}\n\nUser: {}",
+            system_prompt,
+            history_context,
+            error_patterns_context,
+            prompt,
+            conversation_history,
+            prompt
+        );
 
         // Channel Init
         let (input_tx, _input_rx) = mpsc::channel::<String>(10);
@@ -321,8 +319,15 @@ pub async fn run_interactive_loop<S: ChatService + Clone + Send + 'static>(
 
         let _ = room_clone.typing(true).await;
 
-        let result =
-            execute_with_fallback(&config, state.clone(), &room_clone, context, &agent_name).await;
+        let result = execute_with_fallback(
+            &config,
+            state.clone(),
+            &room_clone,
+            &full_prompt,
+            &agent_name,
+            active_model.clone(),
+        )
+        .await;
 
         match result {
             Ok(response) => {
@@ -967,29 +972,16 @@ pub async fn handle_task<S: ChatService + Clone + Send + 'static>(
 
         let agent_name = resolve_agent_name(active_agent.as_deref(), &config_clone);
 
-        let callback_room = room_clone.clone();
-        let context = AgentContext {
-            prompt,
-            working_dir: working_dir.clone(),
-            model: active_model,
-            status_callback: Some(std::sync::Arc::new(move |msg| {
-                let r = callback_room.clone();
-                tokio::spawn(async move {
-                    let _ = r.send_markdown(&msg).await;
-                });
-            })),
-            abort_signal: None,
-            project_state_manager: working_dir.as_ref().map(|p| {
-                std::sync::Arc::new(crate::state::project::ProjectStateManager::new(p.clone()))
-            }),
-        };
+        // Send initial status message
+        let _ = room_clone.send_markdown("⏳ Processing task...").await;
 
         let result = execute_with_fallback(
             &config_clone,
             state.clone(),
             &room_clone,
-            context,
+            &prompt,
             &agent_name,
+            active_model,
         )
         .await;
 
@@ -1149,29 +1141,23 @@ pub async fn handle_modify<S: ChatService + Clone + Send + 'static>(
 
         let agent_name = resolve_agent_name(active_agent.as_deref(), &config_clone);
 
-        let callback_room = room_clone.clone();
-        let context = AgentContext {
-            prompt,
-            working_dir: working_dir.clone(),
-            model: active_model,
-            status_callback: Some(std::sync::Arc::new(move |msg| {
-                let r = callback_room.clone();
-                tokio::spawn(async move {
-                    let _ = r.send_markdown(&msg).await;
-                });
-            })),
-            abort_signal: None,
-            project_state_manager: working_dir.as_ref().map(|p| {
-                std::sync::Arc::new(crate::state::project::ProjectStateManager::new(p.clone()))
-            }),
-        };
+        // Send initial status message
+        let _ = room_clone
+            .send_markdown(
+                &crate::strings::STRINGS
+                    .messages
+                    .feedback_modification
+                    .replace("{FEEDBACK}", &feedback_clone),
+            )
+            .await;
 
         let result = execute_with_fallback(
             &config_clone,
             state.clone(),
             &room_clone,
-            context,
+            &prompt,
             &agent_name,
+            active_model,
         )
         .await;
 

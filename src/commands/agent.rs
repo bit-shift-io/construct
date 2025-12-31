@@ -1,4 +1,3 @@
-use crate::agent::{AgentContext, providers};
 use crate::commands::core::execute_with_fallback;
 use crate::config::AppConfig;
 use crate::services::ChatService;
@@ -206,16 +205,9 @@ pub async fn handle_models(
         return;
     };
 
-    // Now fetch models using unified provider interface
-    let mut model_list = match providers::list_models(&cfg.protocol, cfg).await {
-        Ok(models) => models,
-        Err(e) => {
-            // Log error but don't show full traceback to user unless verbose?
-            // User sees fallbacks anyway.
-            // response.push_str(&format!("⚠️ Discovery failed: {}\n", e));
-            Vec::new()
-        }
-    };
+    // For now, just return configured models from config
+    // The simplified LLM API doesn't expose model listing
+    let mut model_list = vec![cfg.model.clone()];
 
     // Append configured fallbacks if not already present
     if let Some(fallbacks) = &cfg.model_fallbacks {
@@ -399,32 +391,27 @@ pub async fn handle_ask<S: ChatService + Clone + Send + 'static>(
         let callback_room = room_clone.clone();
         let callback_helper = helper.clone();
         let callback_state = state.clone();
-        let context = AgentContext {
-            prompt,
-            working_dir: working_dir.clone(),
-            model: active_model,
-            status_callback: Some(std::sync::Arc::new(move |msg| {
-                let r = callback_room.clone();
-                let h = callback_helper.clone();
-                let s = callback_state.clone();
-                tokio::spawn(async move {
-                    let mut st = s.lock().await;
-                    // Use send_or_edit to update the same message
-                    let _ = h.send_or_edit_markdown(&r, &mut st, &msg, false).await;
-                });
-            })),
-            abort_signal: None,
-            project_state_manager: working_dir.as_ref().map(|p| {
-                std::sync::Arc::new(crate::state::project::ProjectStateManager::new(p.clone()))
-            }),
+        let callback = move |msg: String| {
+            let r = callback_room.clone();
+            let h = callback_helper.clone();
+            let s = callback_state.clone();
+            tokio::spawn(async move {
+                let mut st = s.lock().await;
+                // Use send_or_edit to update the same message
+                let _ = h.send_or_edit_markdown(&r, &mut st, &msg, false).await;
+            });
         };
+
+        // Send initial status message
+        callback("⏳ Processing your question...".to_string());
 
         let response = execute_with_fallback(
             &config_clone,
             state.clone(),
             &room_clone,
-            context,
+            &prompt,
             &agent_name,
+            active_model,
         )
         .await;
 

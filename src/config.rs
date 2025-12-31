@@ -95,7 +95,7 @@ pub type AgentsConfig = HashMap<String, AgentConfig>;
 #[derive(Debug, Deserialize, Clone)]
 pub struct AgentConfig {
     #[serde(default)]
-    pub protocol: String,
+    pub provider: String,
     #[serde(default)]
     pub command: Option<String>, // Legacy CLI command
     #[serde(default)]
@@ -114,6 +114,27 @@ pub struct AgentConfig {
     pub fallback_agent: Option<String>, // Agent to switch to if all models fail
     #[serde(default)]
     pub requests_per_minute: Option<u64>,
+    /// Additional provider-specific parameters (e.g., caching, debug, temperature)
+    #[serde(default)]
+    pub extra_params: std::collections::HashMap<String, serde_json::Value>,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            provider: String::new(),
+            command: None,
+            model: String::new(),
+            endpoint: None,
+            api_key: None,
+            api_key_env: None,
+            model_order: None,
+            model_fallbacks: None,
+            fallback_agent: None,
+            requests_per_minute: None,
+            extra_params: std::collections::HashMap::new(),
+        }
+    }
 }
 
 /// Specific configuration for the Matrix service.

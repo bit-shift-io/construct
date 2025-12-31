@@ -1,13 +1,21 @@
 #![recursion_limit = "256"]
 
-mod agent;
 mod bridge;
 mod commands;
 mod config;
 mod mcp;
 
+mod llm;
+
+// Conditionally include Redis support
+#[cfg(feature = "redis")]
+mod redis;
+
 mod features;
+// Conditionally include Redis support
 mod patterns;
+#[cfg(feature = "redis")]
+mod redis;
 mod services;
 mod state;
 mod utils;
