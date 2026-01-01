@@ -1,275 +1,179 @@
 #![recursion_limit = "256"]
-mod commands;
-mod core;
-mod llm;
-mod mcp;
+//! # Main Entry Point (V2)
+//!
+//! Initializes the application using the V2 architecture:
+//! - Domain: Configuration and Types
+//! - Infrastructure: Matrix, MCP, LLM
+//! - Application: Router, Engine, Logging, Feed
+//! - Interface: Command Handlers
+//!
 
-mod services;
-mod strings;
+mod domain;
+mod infrastructure;
+mod application;
+mod interface;
+mod strings; 
 
 use anyhow::{Context, Result};
 use matrix_sdk::{
     Client,
     config::SyncSettings,
     room::Room,
-    ruma::{
-        RoomId,
-        events::room::{
-            member::{MembershipState, StrippedRoomMemberEvent},
-            message::SyncRoomMessageEvent,
-        },
+    ruma::events::room::{
+        member::{MembershipState, StrippedRoomMemberEvent},
+        message::SyncRoomMessageEvent,
     },
 };
 use std::fs;
 use std::sync::{Arc, OnceLock};
 use tokio::sync::Mutex;
 use tracing;
-use tracing_subscriber;
 
+use crate::domain::config::AppConfig;
+use crate::application::router::CommandRouter;
+use crate::application::project::ProjectManager;
+use crate::infrastructure::mcp::client::McpClient;
+use crate::infrastructure::matrix::MatrixService;
+use crate::infrastructure::llm::Client as LlmClient;
 
-use crate::core::bridge::BridgeManager;
-use crate::core::config::AppConfig;
-use crate::core::state::BotState;
-use crate::mcp::McpManager;
-use crate::services::matrix::MatrixService;
-use crate::strings::logs;
-use std::time::SystemTime;
-
-/// Static configuration and state managers.
-/// Using OnceLock for safe global access.
 static CONFIG: OnceLock<AppConfig> = OnceLock::new();
-static BRIDGE_MANAGER: OnceLock<Arc<BridgeManager>> = OnceLock::new();
-static MCP_MANAGER: OnceLock<Option<Arc<McpManager>>> = OnceLock::new();
+static ROUTER: OnceLock<Arc<CommandRouter>> = OnceLock::new();
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing subscriber for logging
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                tracing_subscriber::EnvFilter::new("info")
-                    // Filter out verbose Matrix SDK logs
-                    .add_directive("matrix_sdk=warn".parse().unwrap())
-                    .add_directive("hyper=warn".parse().unwrap())
-                    // Filter out sync callback spam
-                    .add_directive("sync_with_callback=off".parse().unwrap())
-                    // Filter out backup warnings
-                    .add_directive("backup=off".parse().unwrap())
-                    // Keep important Matrix connection logs
-                    .add_directive("matrix_sdk::client=info".parse().unwrap())
-            }),
-        )
-        .with_target(false)
-        .with_level(true)
+    // 1. Load Configuration
+    let config_content = fs::read_to_string("data/config.yaml").context("Failed to read config.yaml")?;
+    let config: AppConfig = serde_yaml::from_str(&config_content).context("Failed to parse config.yaml")?;
+    CONFIG.set(config.clone()).ok();
+
+    CONFIG.set(config.clone()).ok();
+    
+    // 2. Logging Setup
+    // Ensure data directory exists
+    if !std::path::Path::new("data").exists() {
+        fs::create_dir("data").context("Failed to create data directory")?;
+    }
+
+    let file_appender = tracing_appender::rolling::never("data", "session.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        tracing_subscriber::EnvFilter::new("info")
+    });
+    
+    // Layer for file
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(non_blocking)
+        .with_ansi(false);
+
+    // Layer for console
+    let console_layer = tracing_subscriber::fmt::layer()
+        .with_writer(std::io::stdout);
+
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(console_layer)
+        .with(file_layer)
         .init();
 
-    // 1. Initial configuration loading
-    let config_content =
-        fs::read_to_string("data/config.yaml").context(logs::CONFIG_READ_ERROR)?;
+    tracing::info!("Starting Construct V2...");
 
-    let config: AppConfig =
-        serde_yaml::from_str(&config_content).context(logs::CONFIG_PARSE_ERROR)?;
-
-    // Clear agent.log on startup for fresh debugging session
-    let _ = fs::write(
-        "data/agent.log",
-        logs::agent_session_start(&chrono::Local::now().to_rfc3339()),
-    );
-
-    // 2. Initialize global state and manager
-    let state = Arc::new(Mutex::new(BotState::load()));
-
-    // Initialize MCP Manager (optional - will continue without it if it fails)
-    let mcp_manager = match McpManager::new(
+    // 3. Initialize Infrastructure
+    // MCP
+    let mcp = Arc::new(Mutex::new(McpClient::new(
         &config.mcp.server_path,
         &config.mcp.allowed_directories,
         config.mcp.readonly,
-    )
-    .await
-    {
-        Ok(manager) => {
-            tracing::info!(
-                "{}",
-                logs::mcp_started(&config.mcp.allowed_directories)
-            );
-            Some(Arc::new(manager))
-        }
-        Err(e) => {
-            tracing::error!("{}", logs::mcp_failed(&e.to_string()));
-            tracing::warn!("{}", logs::MCP_START_FAIL_WARN);
-            None
-        }
-    };
+    ).await?));
+    
+    // LLM
+    let llm = Arc::new(LlmClient::new(config.clone()));
 
-    MCP_MANAGER.set(mcp_manager.clone()).ok();
+    // 4. Initialize Application Components
+    let project_manager = Arc::new(ProjectManager::new(mcp.clone()));
+    let state = Arc::new(Mutex::new(crate::application::state::BotState::load()));
 
-    let bridge_manager = Arc::new(BridgeManager::new(
-        config.clone(),
-        state.clone(),
-        mcp_manager.clone(),
-    ));
-
-    CONFIG.set(config.clone()).ok();
-    BRIDGE_MANAGER.set(bridge_manager).ok();
-
-    tracing::info!(
-        "{}",
-        logs::config_loaded(&config.services.matrix.username)
-    );
-
-    // 3. Setup Matrix Client
-
-    // 3. Setup Matrix Client
+    // 5. Matrix Setup
     let client = Client::builder()
         .homeserver_url(&config.services.matrix.homeserver)
         .build()
         .await?;
 
-    // 4. Authenticate
-    client
-        .matrix_auth()
-        .login_username(
-            &config.services.matrix.username,
-            &config.services.matrix.password,
-        )
+    client.matrix_auth()
+        .login_username(&config.services.matrix.username, &config.services.matrix.password)
         .send()
         .await?;
+        
+    tracing::info!("Logged in as {}", config.services.matrix.username);
 
-    tracing::info!("{}", logs::LOGIN_SUCCESS);
+    // 6. Event Loop
+    let start_time = std::time::SystemTime::now();
+    let startup_client = client.clone();
+    let startup_project_manager = project_manager.clone();
+    let startup_state = state.clone();
+    let startup_config = config.clone();
 
-    // 5. Update Display Name if configured
-    if let Some(display_name) = &config.services.matrix.display_name {
-        tracing::info!(
-            "{}",
-            logs::setting_display_name(display_name)
-        );
-        if let Err(e) = client.account().set_display_name(Some(display_name)).await {
-            tracing::error!(
-                "{}",
-                logs::set_display_name_fail(&e.to_string())
-            );
-        }
-    }
-
-    // 6. Register Event Handlers
-    // Invitations: handled locally in main or moved to bridge if needed
-    client.add_event_handler(|ev: StrippedRoomMemberEvent, room: Room| async move {
-        handle_invites(ev, room).await
-    });
-
-    // Messages: delegated to BridgeManager
-    let start_time = SystemTime::now();
-    client.add_event_handler(move |ev: SyncRoomMessageEvent, room: Room| async move {
-        if let Some(manager) = BRIDGE_MANAGER.get() {
-            // Ensure we only process messages from rooms we have joined
-            if room.state() != matrix_sdk::RoomState::Joined {
-                return;
+    // Startup Announcement Task
+    tokio::spawn(async move {
+        // Wait for initial sync to likely populate state
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        
+        for room in startup_client.joined_rooms() {
+            let chat = MatrixService::new(room.clone());
+            // We can reuse the handle_status logic
+            // Note: Router logic for .status uses handle_status.
+            // We can just call it directly.
+            if let Err(e) = crate::interface::commands::misc::handle_status(&startup_state, &chat).await {
+                tracing::error!("Failed to send startup status to room {}: {}", room.room_id(), e);
             }
-            let SyncRoomMessageEvent::Original(event) = ev else {
-                return;
-            };
-
-            // Ignore messages from self
-            if event.sender == room.own_user_id() {
-                return;
-            }
-
-            // Ignore messages sent before the bot started
-            let ts = SystemTime::UNIX_EPOCH
-                + std::time::Duration::from_millis(event.origin_server_ts.0.into());
-            if ts < start_time {
-                return;
-            }
-
-            let msg_body = event.content.body();
-            let sender = event.sender.as_str();
-
-            // Create generic service wrapper
-            let service = MatrixService::new(room);
-
-            // Dispatch
-            manager.dispatch(&service, sender, msg_body).await;
         }
     });
 
-    // 6. Start Sync Loop
-    let sync_client = client.clone();
-    let sync_handle = tokio::spawn(async move {
-        tracing::info!("{}", logs::SYNC_LOOP_START);
-        if let Err(e) = sync_client.sync(SyncSettings::default()).await {
-            tracing::error!("{}", logs::sync_loop_fail(&e.to_string()));
-        }
-    });
+    client.add_event_handler(move |ev: SyncRoomMessageEvent, room: Room| {
+        let config = config.clone();
+        let mcp = mcp.clone();
+        let llm = llm.clone();
+        let state = state.clone();
+        let project_manager = project_manager.clone();
+        
+        async move {
+            let make_chat = |room: Room| MatrixService::new(room);
+            let make_router = |config, mcp, llm, pm, state| CommandRouter::new(config, mcp, llm, pm, state);
 
-    // 7. Initialize Room states from bridges
-    setup_bridges(&client, &config, state.clone(), mcp_manager.clone()).await;
+            if let Some(original_msg) = ev.as_original() {
+                // Ignore events older than start_time
+                let ts = ev.origin_server_ts();
+                // Ruma MilliSecondsSinceUnixEpoch
+                let event_time = std::time::UNIX_EPOCH + std::time::Duration::from_millis(ts.get().into());
+                if event_time < start_time {
+                    return;
+                }
 
-    // 8. Graceful Shutdown
-    match tokio::signal::ctrl_c().await {
-        Ok(()) => tracing::info!("{}", logs::SHUTDOWN),
-        Err(err) => tracing::error!("{}", logs::shutdown_fail(&err.to_string())),
-    }
-
-    sync_handle.abort();
-    Ok(())
-}
-
-/// Iterates through configured bridges and joins necessary Matrix rooms.
-async fn setup_bridges(
-    client: &Client,
-    config: &AppConfig,
-    state: Arc<Mutex<BotState>>,
-    mcp_manager: Option<Arc<crate::mcp::McpManager>>,
-) {
-    for (bridge_name, entries) in &config.bridges {
-        for entry in entries {
-            if entry.service.as_deref() == Some("matrix") {
-                if let Some(room_id_str) = &entry.channel {
-                    tracing::info!(
-                        "{}",
-                        logs::bridge_joining(bridge_name, room_id_str)
-                    );
-
-                    if let Ok(room_id) = RoomId::parse(room_id_str) {
-                        if let Err(e) = client.join_room_by_id(&room_id).await {
-                            tracing::error!(
-                                "{}",
-                                logs::bridge_join_fail(room_id_str, &e.to_string())
-                            );
-                        } else if let Some(room) = client.get_room(&room_id) {
-                            tracing::info!(
-                                "{}",
-                                logs::bridge_join_success(room_id_str)
-                            );
-
-                            // Send status message instead of welcome message
-                            let service = MatrixService::new(room);
-                            commands::handle_status(
-                                &config,
-                                state.clone(),
-                                mcp_manager.clone(),
-                                &service,
-                            )
-                            .await;
-                        }
-                    }
+                if let matrix_sdk::ruma::events::room::message::MessageType::Text(text_content) = &original_msg.content.msgtype {
+                     let body = &text_content.body;
+                     if original_msg.sender == room.own_user_id() { return; }
+                     
+                     let chat = make_chat(room);
+                     let router = make_router(config, mcp, llm, project_manager, state);
+                     
+                     // Dispatch
+                     let _ = router.route(&chat, &body).await;
                 }
             }
         }
-    }
-}
+    });
 
-/// Handles incoming room invitations.
-async fn handle_invites(event: StrippedRoomMemberEvent, room: Room) {
-    if event.content.membership == MembershipState::Invite {
-        tracing::info!(
-            "{}",
-            logs::invite_received(&format!("{:?}", room.room_id()))
-        );
-        if let Err(e) = room.join().await {
-            tracing::error!("{}", logs::join_invite_fail(&e.to_string()));
-        } else {
-            tracing::info!("{}", logs::JOIN_INVITE_SUCCESS);
-        }
-    }
+    // Handle Invites
+    client.add_event_handler(|ev: StrippedRoomMemberEvent, room: Room| async move {
+         if ev.content.membership == MembershipState::Invite {
+             let _ = room.join().await;
+         }
+    });
+    
+    client.sync(SyncSettings::default()).await?;
+
+    Ok(())
 }

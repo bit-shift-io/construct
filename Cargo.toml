@@ -17,7 +17,9 @@ chrono = "0.4"
 clap = { version = "4.5", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "local-time"] }
-rust-mcp-filesystem = { git = "https://github.com/rust-mcp-stack/rust-mcp-filesystem.git", default-features = false }
+regex = "1.12.2"
+tracing-appender = "0.2.4"
+
 
 [features]
 default = []
@@ -29,6 +31,4 @@ tempfile = "3.14"
 name = "construct"
 path = "src/main.rs"
 
-[[bin]]
-name = "rust-mcp-filesystem"
-path = "src/bin/rust-mcp-filesystem.rs"
+

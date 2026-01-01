@@ -1,3 +1,8 @@
+//! # Help Text
+//!
+//! detailed help messages and documentation for bot commands.
+//! Displayed to the user via the `.help` command.
+
 pub const MAIN: &str = concat!(
     "**🤖 Construct Help**\n",
     "Use: .command _args_\n\n",

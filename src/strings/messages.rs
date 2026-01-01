@@ -1,9 +1,13 @@
-
+//! # Messages
+//!
+//! Contains constant strings and format functions for user-facing messages.
+//! Includes error messages, status updates, and notification templates.
 
 pub fn model_set(name: &str) -> String {
     format!("✅ **Model set to**: `{name}`")
 }
 
+pub const WELCOME: &str = "👋 Welcome! I am your AI assistant.";
 pub const MODEL_RESET: &str = "✅ **Model reset to default**.";
 pub const INVALID_MODEL: &str = "⚠️ **Invalid model index or name**.";
 pub const NO_PROJECTS_FOUND: &str = "📂 **No projects found**.";

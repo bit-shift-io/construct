@@ -1,5 +1,5 @@
 /target
 /data
 /prompts
+/docs
 !README.md
-*.md

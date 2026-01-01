@@ -1,3 +1,8 @@
+//! # Log Strings
+//!
+//! Constants for logging and internal debug messages.
+//! Helps maintain consistent log formats across the application.
+
 pub fn config_loaded(user: &str) -> String {
     format!("Loaded configuration for user: {user}")
 }
@@ -17,6 +22,8 @@ pub const SYNC_LOOP_START: &str = "Starting sync loop...";
 pub fn sync_loop_fail(err: &str) -> String {
     format!("Sync loop failed: {err}")
 }
+
+pub const STARTUP: &str = "Starting application...";
 
 pub const SHUTDOWN: &str = "Shutting down...";
 
@@ -53,9 +60,11 @@ pub fn agent_session_start(timestamp: &str) -> String {
     format!("--- [{}] Agent session started ---\n\n", timestamp)
 }
 
-
 pub fn mcp_started(dirs: &[String]) -> String {
-    format!("MCP sidecar started successfully with allowed directories: {:?}", dirs)
+    format!(
+        "MCP sidecar started successfully with allowed directories: {:?}",
+        dirs
+    )
 }
 
 pub const MCP_FAILED: &str = "Failed to start MCP sidecar: {}";
