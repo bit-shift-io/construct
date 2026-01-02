@@ -19,7 +19,6 @@ pub struct AppConfig {
     pub commands: CommandsConfig,
     #[serde(default)]
     pub system: SystemConfig,
-    pub mcp: McpConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -80,6 +79,8 @@ pub struct SystemConfig {
     pub action_delay: Option<u64>,
     #[serde(default)]
     pub admin: Vec<String>,
+    #[serde(default)]
+    pub allowed_directories: Vec<String>,
 }
 
 /// Represents a specific bridge entry connecting a service to a channel.
@@ -154,28 +155,4 @@ pub struct MatrixConfig {
     pub homeserver: String,
     #[serde(default)]
     pub display_name: Option<String>,
-}
-
-/// Configuration for MCP (Model Context Protocol) server
-#[derive(Debug, Deserialize, Clone)]
-#[allow(dead_code)]
-pub struct McpConfig {
-    /// Path to the MCP server binary
-    pub server_path: String,
-    /// List of directories the MCP server is allowed to access
-    pub allowed_directories: Vec<String>,
-    /// Enable read-only mode for additional safety
-    #[serde(default = "default_false")]
-    pub readonly: bool,
-    /// Default timeout in seconds for commands
-    #[serde(default = "default_mcp_timeout")]
-    pub default_timeout: u64,
-}
-
-fn default_false() -> bool {
-    false
-}
-
-fn default_mcp_timeout() -> u64 {
-    120
 }

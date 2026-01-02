@@ -3,29 +3,27 @@
 //! Manages project-specific context and operations, such as identifying the active project root
 //! and handling project creation or listing via MCP.
 
-use crate::infrastructure::mcp::client::SharedMcpClient;
+use crate::infrastructure::tools::executor::SharedToolExecutor;
 use anyhow::Result;
 use std::path::Path;
 
+/// Manages project-specific logic using the internal Tool System.
+#[derive(Debug)]
 pub struct ProjectManager {
-    mcp: SharedMcpClient,
+    tools: SharedToolExecutor,
 }
 
 impl ProjectManager {
-    pub fn new(mcp: SharedMcpClient) -> Self {
-        Self { mcp }
+    pub fn new(tools: SharedToolExecutor) -> Self {
+        Self { tools }
     }
 
     /// Create a new project directory and initial files
     pub async fn create_project(&self, name: &str, parent_dir: &str) -> Result<String> {
-        let mut client = self.mcp.lock().await;
+        let client = self.tools.lock().await;       
         let project_path = Path::new(parent_dir).join(name);
         let path_str = project_path.to_string_lossy().to_string();
 
-        // 1. Create Directory
-        client.create_directory(&path_str, true).await?;
-
-        // 2. Create Initial Files
         // roadmap.md
         client.write_file(
             &format!("{}/roadmap.md", path_str),
@@ -47,12 +45,10 @@ impl ProjectManager {
         Ok(path_str)
     }
 
-    /// Validate if a path is a valid project
+    /// Validate if a given path is a valid project (currently checks for roadmap.md).
     pub async fn is_valid_project(&self, path: &str) -> bool {
-        let mut client = self.mcp.lock().await;
-        // Check for roadmap.md existence using list_directory as a proxy?
-        // Or try to read it.
-        // McpClient read_file returns Result.
+        let client = self.tools.lock().await;
+        // Check for roadmap.md existence using read_file as a proxy.
         client.read_file(&format!("{}/roadmap.md", path)).await.is_ok()
     }
 }

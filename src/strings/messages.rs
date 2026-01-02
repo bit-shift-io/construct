@@ -8,205 +8,97 @@ pub fn model_set(name: &str) -> String {
 }
 
 pub const WELCOME: &str = "👋 Welcome! I am your AI assistant.";
-pub const MODEL_RESET: &str = "✅ **Model reset to default**.";
-pub const INVALID_MODEL: &str = "⚠️ **Invalid model index or name**.";
-pub const NO_PROJECTS_FOUND: &str = "📂 **No projects found**.";
-pub const AVAILABLE_PROJECTS_HEADER: &str = "**📂 Available Projects**\n";
-pub const INVALID_PROJECT_NAME: &str = "⚠️ **Invalid project name**.";
 
-pub fn admin_permission_denied(user: &str) -> String {
-    format!("{user} you do not have permission to run terminal commands.")
-}
-
-pub fn directory_changed(path: &str) -> String {
-    format!("📂 **Directory changed**: `{path}`")
-}
-
-pub const ACCESS_DENIED_SANDBOX: &str = "❌ Access denied: Path outside the sandbox.";
-pub const DIRECTORY_NOT_FOUND: &str = "❌ Directory not found.";
-pub const COMMAND_NO_OUTPUT: &str = "✅ (Command executed successfully, no output)";
-
-pub fn write_plan_error(err: &str) -> String {
-    format!("⚠️ Failed to write plan.md: {err}")
-}
-
-pub fn write_tasks_error(err: &str) -> String {
-    format!("⚠️ Failed to write tasks.md: {err}")
-}
-
-pub fn feedback_modification(feedback: &str) -> String {
-    format!("🔄 Modifying plan with feedback: *{feedback}*")
-}
-
-pub fn failed_modify(err: &str) -> String {
-    format!("⚠️ **Failed to modify plan**:\n{err}")
-}
-
-pub fn plan_updated(content: &str) -> String {
-    format!("📜 **Plan Updated**:\n\n{content}")
-}
-
-pub const LIMIT_REACHED: &str = "⚠️ **Limit Reached**: Stopped to prevent infinite loop.";
-pub const STOP_REQUESTED: &str = "🛑 **Execution stopped by user.**";
-
-pub fn execution_complete(result: &str, output: &str) -> String {
-    format!("🏁 **Execution Complete**\n\n{result}{output}")
-}
-
-
-
-pub fn agent_says(msg: &str) -> String {
-    format!("🤔 **Agent says**:\n{msg}")
-}
-
-
-
-pub const STOP_REQUEST_WAIT: &str = "🛑 **Stop requested**. Waiting for current step to finish...";
-
-pub fn plan_approved(job: &str) -> String {
-    format!("✅ Plan approved for: **{job}**\nStarting interactive execution...")
-}
-
-pub const NO_TASK_APPROVE: &str = "⚠️ **No task to approve**.";
-pub const RESUMING_EXECUTION: &str = "🔄 **Resuming execution**...";
-pub const NO_HISTORY_CONTINUE: &str = "⚠️ **No execution history found to continue**. Start a new task.";
-
-pub const PLEASE_COMMIT_MSG: &str = "⚠️ **Please provide a commit message**: `.commit _message_`";
-
-pub fn committed_msg(output: &str) -> String {
-    format!("🚀 **Committed**:\n{output}")
-}
-
-pub const CHANGES_DISCARDED: &str = "🧹 **Changes discarded**.";
-pub const CHECKING_MSG: &str = "🔍 **Checking**...";
-
-pub fn check_result(result: &str) -> String {
-    format!("🔍 **Check Result**:\n{result}")
-}
-
-pub const BUILDING_MSG: &str = "🔨 **Building**...";
-
-pub fn build_result(result: &str) -> String {
-    format!("🔨 **Build Result**:\n{result}")
-}
-
-pub const DEPLOYING_MSG: &str = "🚀 **Deploying**...";
-
-pub fn deploy_result(result: &str) -> String {
-    format!("🚀 **Deploy Result**:\n{result}")
-}
-
-pub fn code_block_output(content: &str) -> String {
-    format!("```\n{content}\n```")
-}
-
-
-
-
-
-
-
-
-
-pub fn command_run_failed(err: &str) -> String {
-    format!("Failed to run command: {err}")
-}
-
-pub fn shell_command_failed(err: &str) -> String {
-    format!("Failed to run shell command: {err}")
-}
-
-
-
-pub const COMMAND_DENIED_USER: &str = "🚫 **Command denied by user**.";
-pub const NO_PENDING_COMMAND: &str = "⚠️ **No pending command to approve/deny**.";
-
-
-
-
-
-
-
-
-
-
-
-pub const NO_PROJECTS_CONFIGURED: &str = "⚠️ No `projects_dir` configured.";
-pub const PROVIDE_PROJECT_NAME: &str = "⚠️ **Please provide a project name**: `.new _name_`";
-
-pub fn project_exists(path: &str) -> String {
-    format!("📂 **Project already exists**. Switched to: `{path}`\nSpecs detected.")
-}
-
-pub fn create_dir_failed(path: &str, err: &str) -> String {
-    format!("\n❌ **Failed to create directory** `{path}`: {err}")
-}
-
-pub fn project_created(path: &str) -> String {
-    format!("\n📂 **Created and set project directory to**: `{path}`\n📄 **Initialized specs**: `roadmap.md`, `changelog.md`")
-}
-
-pub const USE_TASK_TO_START: &str = "\n\nUse `.task` to start a new workflow.";
-
-pub fn plan_generated(plan: &str, tasks: &str) -> String {
-    format!("### Plan\n\n{plan}\n\n### Tasks generated.{tasks}\n")
-}
-
-pub fn plan_generation_failed(err: &str) -> String {
-    format!("⚠️ **Failed to generate plan**:\n{err}")
-}
-
-pub const NO_ACTIVE_TASK_MODIFY: &str = "⚠️ No active task to modify. Use `.task` first.";
-
-pub fn current_changes_header(diff: &str) -> String {
-    format!("🔍 **Current Changes**:\n```diff\n{diff}\n```")
-}
-
-pub const INVALID_AGENT_SELECTION: &str = "⚠️ Invalid agent selection.";pub const AVAILABLE_AGENTS_HEADER: &str = "**🤖 Available Agents**\n\n";
-pub const NO_AGENTS_AVAILABLE: &str = "No agents available.\n";
-pub const AGENT_SWITCH_INSTRUCTION: &str = "\nUse `.agent <name|number>` to switch.";
-pub const ACTIVE_AGENT_CONFIG_NOT_FOUND: &str = "⚠️ Active agent configuration not found.";
-pub const NO_MODELS_FOUND: &str = "No models found or discovery not supported for this agent.\n";
-pub const MODEL_SWITCH_INSTRUCTION: &str = "\nUse `.model <name|number>` to switch active model.";
-
-pub fn models_header(agent: &str) -> String {
-    format!("**🤖 Models for Agent: {}**\n\n", agent)
-}
-
-
-
-pub fn list_projects_failed(err: &str) -> String {
-    format!("⚠️ Failed to list projects: {err}")
-}
-
-pub const NO_PROJECT_SET: &str = "📂 **No project set**. Use `.project _path_`";
-
-pub fn project_set_to(path: &str) -> String {
-    format!("📂 **Project info set to**: `{path}`")
-}
-
-pub fn path_not_dir(path: &str) -> String {
-    format!("⚠️ `{path}` is not a directory or does not exist.")
-}
-
-pub const SPECIFY_FILES_READ: &str = "⚠️ **Please specify files**: `.read _file1_ _file2_`";
-
-pub fn file_content_header(file: &str, content: &str) -> String {
-    format!("**📄 `{file}`**\n```\n{content}\n```\n\n")
-}
-
-pub fn read_file_error(file: &str, err: &str) -> String {
-    format!("❌ Failed to read `{file}`: {err}\n\n")
-}
-
-pub const SET_USAGE: &str = "⚠️ **Usage**: `.set _key_ _value_`";
-
-pub fn unknown_set_variable(var: &str) -> String {
-    format!("⚠️ Unknown variable `{var}`. Supported: `project`, `agent`")
-}
-
-pub const EMPTY_COMMAND: &str = "Empty command";
+// ... (Removed unused strings)
 
 pub fn command_timed_out(duration: std::time::Duration) -> String {
     format!("Command timed out after {duration:?}. Consider breaking this into smaller steps or running in the background.")
 }
+// New Strings
+pub const AUTH_DENIED: &str = "🚫 **Authorization Denied**.";
+pub const UNKNOWN_COMMAND: &str = "❓ Unknown command.";
+pub const TASK_COMPLETE: &str = "✅ **Task Complete**.";
+
+pub fn task_failed(err: &str) -> String {
+    format!("❌ **Task Failed**: {err}")
+}
+
+pub fn project_created_notification(name: &str, path: &str) -> String {
+    format!("Project '{name}' created at `{path}`.")
+}
+
+pub fn project_creation_failed(err: &str) -> String {
+    format!("Failed to create project: {err}")
+}
+
+pub fn directory_changed_msg(path: &str) -> String {
+     format!("Changed directory to `{path}`")
+}
+
+pub fn invalid_directory(err: &str) -> String {
+    format!("Invalid directory: {err}")
+}
+
+pub fn command_output_format(workdir: &str, command: &str, output: &str) -> String {
+    format!("**[{workdir}]** $ `{command}`\n```\n{output}\n```")
+}
+
+pub fn command_failed(err: &str) -> String {
+    format!("Command Failed: {err}")
+}
+
+pub fn llm_error(err: &str) -> String {
+    format!("LLM Error: {err}")
+}
+
+pub const READ_USAGE: &str = "Usage: `.read <file_path>`";
+pub const ASK_USAGE: &str = "Usage: `.ask <message>`";
+pub const PROJECT_USAGE: &str = "Usage: `.project <path>`";
+
+pub fn active_project_set(path: &str) -> String {
+    format!("Active project set to: `{path}`")
+}
+
+pub fn invalid_project_path(path: &str) -> String {
+    format!("Path `{path}` does not appear to be a valid project (missing roadmap.md).")
+}
+
+pub fn project_listing_not_implemented(path: &str) -> String {
+    format!("Project listing for `{path}` not yet implemented in PM.")
+}
+
+pub const NOT_IN_PROJECT: &str = "⚠️ You are not inside a project. Use `.new` or `.open` (cd) first.";
+
+pub fn file_read_success(path: &str, content: &str) -> String {
+    format!("**File: {path}**\n\n```\n{content}\n```")
+}
+
+pub fn file_read_failed(err: &str) -> String {
+    format!("Failed to read file: {err}")
+}
+
+pub fn room_status_msg(
+    id: &str,
+    project: &str,
+    cwd: &str,
+    task: &str,
+    model: &str,
+    agent: &str
+) -> String {
+    format!(
+        "**🤖 Room Status**\n\n**ID**: `{id}`\n**Project**: `{project}`\n**CWD**: `{cwd}`\n**Task**: `{task}`\n**Model**: `{model}`\n**Agent**: `{agent}`"
+    )
+}
+
+pub const NO_ACTIVE_STATE: &str = "No active state for this room.";
+
+pub const WIZARD_CANCELLED: &str = "❌ Wizard cancelled.";
+pub const WIZARD_CREATING_PROJECT: &str = "Creating project...";
+pub const WIZARD_PROJECT_CREATED_MSG: &str = "✅ **Project Created!**\n\nYou can now use `.task <instruction>` to start working."; 
+// Note: We might want a dynamic one for wizard success to show path, but let's stick to what we see in the code or make it dynamic.
+
+pub fn wizard_project_created(path: &str) -> String {
+    format!("✅ **Project Created!**\n\nLocation: `{path}`\n\nYou can now use `.task <instruction>` to start working.")
+}
+
+pub const PLEASE_CONFIRM_OR_CANCEL: &str = "Please type `.ok` to confirm or `.cancel` to abort.";

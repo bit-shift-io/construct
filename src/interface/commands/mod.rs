@@ -9,3 +9,4 @@ pub mod admin;
 pub mod help;
 pub mod project;
 pub mod misc;
+pub mod wizard;

@@ -41,6 +41,8 @@ pub struct WizardState {
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct RoomState {
     pub current_project_path: Option<String>,
+    #[serde(default)]
+    pub current_working_dir: Option<String>,
     pub active_task: Option<String>,
     pub active_agent: Option<String>,
     pub active_model: Option<String>,
@@ -110,7 +112,14 @@ impl BotState {
     /// Loads the state from `data/state.json` or returns default.
     pub fn load() -> Self {
         if let Ok(content) = fs::read_to_string("data/state.json") {
-            if let Ok(state) = serde_json::from_str(&content) {
+            if let Ok(mut state) = serde_json::from_str::<Self>(&content) {
+                // Sanitize: Reset wizards on load
+                for room in state.rooms.values_mut() {
+                    room.wizard.active = false;
+                    room.wizard.step = None;
+                    room.wizard.data.clear();
+                    room.wizard.buffer.clear();
+                }
                 return state;
             }
         }

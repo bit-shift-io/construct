@@ -7,7 +7,6 @@
 use crate::application::state::{WizardMode, WizardStep};
 use std::collections::HashMap;
 
-pub const CANCELLED: &str = "❌ Wizard cancelled.";
 
 pub fn format_wizard_step(
     step: &WizardStep,
@@ -19,10 +18,10 @@ pub fn format_wizard_step(
     // Logic to select title/description based on step
     match step {
         WizardStep::ProjectName => {
-             output.push_str("### 🧙 New Project Wizard\n\n**Step 1: Project Name**\n\nPlease enter a name for your new project (e.g., `my-awesome-app`).");
+             output.push_str("### 🧙 New Project Wizard\n\n**Step 1: Project Name**\n\nPlease enter a name for your new project.");
         }
         WizardStep::Description => {
-             output.push_str("### 📝 Project Description\n\n**Step 2: Description**\n\nDescribe what you want to build.");
+             output.push_str("### 📝 Project Description\n\n**Step 2: Description**\n\nDescribe your project.\n `.ok` to confirm.");
         }
         WizardStep::TaskDescription => {
              output.push_str("### 📋 New Task\n\n**Describe the task**\n\nWhat would you like the agent to do?");

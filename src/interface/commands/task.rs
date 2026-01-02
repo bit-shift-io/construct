@@ -16,7 +16,7 @@ pub async fn handle_task(
 {
     // Validate if inside a project?
     if workdir.is_none() {
-        let _ = chat.send_notification("⚠️ You are not inside a project. Use `.new` or `.open` (cd) first.").await;
+        let _ = chat.send_notification(crate::strings::messages::NOT_IN_PROJECT).await;
         return Ok(());
     }
 
@@ -24,10 +24,10 @@ pub async fn handle_task(
     // Default agent "default" for now
     match engine.run_task(chat, task, "default", workdir).await {
         Ok(_) => {
-            let _ = chat.send_notification("Task Complete.").await;
+            let _ = chat.send_notification(crate::strings::messages::TASK_COMPLETE).await;
         }
         Err(e) => {
-            let _ = chat.send_notification(&format!("Task Failed: {}", e)).await;
+            let _ = chat.send_notification(&crate::strings::messages::task_failed(&e.to_string())).await;
         }
     }
     

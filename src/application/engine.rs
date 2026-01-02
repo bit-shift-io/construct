@@ -6,16 +6,18 @@
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use std::path::Path;
 
 use crate::domain::config::AppConfig;
-use crate::domain::traits::{ChatProvider, LlmProvider};
+use crate::domain::traits::LlmProvider;
 use crate::application::feed::FeedManager;
-use crate::infrastructure::mcp::client::SharedMcpClient;
+use crate::infrastructure::tools::executor::SharedToolExecutor;
+use crate::domain::traits::ChatProvider; // Keep ChatProvider for run_task method
 
 pub struct ExecutionEngine {
     config: AppConfig,
     llm: Arc<dyn LlmProvider>,
-    mcp: SharedMcpClient,
+    tools: SharedToolExecutor,
     feed: Arc<Mutex<FeedManager>>,
 }
 
@@ -23,13 +25,13 @@ impl ExecutionEngine {
     pub fn new(
         config: AppConfig,
         llm: Arc<dyn LlmProvider>,
-        mcp: SharedMcpClient,
+        tools: SharedToolExecutor,
         feed: Arc<Mutex<FeedManager>>,
     ) -> Self {
         Self {
             config,
             llm,
-            mcp,
+            tools,
             feed,
         }
     }
@@ -58,9 +60,9 @@ impl ExecutionEngine {
             // TODO: Extract to ContextEngine
             let (tasks_content, roadmap_content) = if let Some(wd) = &working_dir {
                 // Use MCP to read files strictly
-                let mut mcp = self.mcp.lock().await;
-                let tasks = mcp.read_file(&format!("{}/tasks.md", wd)).await.unwrap_or_else(|_| "(No tasks.md)".into());
-                let roadmap = mcp.read_file(&format!("{}/roadmap.md", wd)).await.unwrap_or_else(|_| "(No roadmap.md)".into());
+                let client = self.tools.lock().await;
+                let tasks = client.read_file(&format!("{}/tasks.md", wd)).await.unwrap_or_else(|_| "(No tasks.md)".into());
+                let roadmap = client.read_file(&format!("{}/roadmap.md", wd)).await.unwrap_or_else(|_| "(No roadmap.md)".into());
                 (tasks, roadmap)
             } else {
                 ("(No context)".into(), "(No context)".into())
@@ -118,10 +120,10 @@ impl ExecutionEngine {
                             let _ = feed.update_feed(chat).await;
                         }
 
-                        // Execute via MCP
-                        // We use a simplified direct execution for now, assuming McpClient handles safety/timeouts logic
-                        let mut mcp = self.mcp.lock().await;
-                        let output = mcp.execute_command(&cmd, Some(120), working_dir.as_deref()).await;
+                        // Execute via ToolExecutor
+                        // We use a simplified direct execution for now, assuming ToolExecutor handles safety/timeouts logic
+                        let client = self.tools.lock().await;
+                        let output = client.execute_command(&cmd, Path::new(working_dir.as_deref().unwrap_or("."))).await;
                         
                         let (out_str, success) = match output {
                             Ok(o) => (o, true), // We need to check if output contains error codes? 

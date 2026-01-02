@@ -48,6 +48,7 @@ impl ChatProvider for MatrixService {
     }
 
     async fn send_message(&self, content: &str) -> Result<String, String> {
+        tracing::info!("Bot sending message to {}: {}", self.room_id(), content);
         self.room
             .send(RoomMessageEventContent::text_markdown(content))
             .await

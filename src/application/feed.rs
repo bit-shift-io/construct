@@ -3,9 +3,9 @@
 //! Manages the real-time "Feed" UI message in the chat.
 //! It handles updates, sticky logic (re-sending the feed if buried), and rendering the current state.
 
+use crate::infrastructure::tools::executor::SharedToolExecutor;
 use crate::domain::traits::ChatProvider;
 use crate::domain::types::AgentAction;
-use crate::infrastructure::mcp::client::SharedMcpClient;
 use anyhow::Result;
 use chrono::Local;
 use serde::{Deserialize, Serialize};
@@ -86,11 +86,11 @@ pub struct FeedManager {
     current_task: Option<String>,
     feed_event_id: Option<String>,
     recent_activities: Vec<String>,
-    mcp_client: SharedMcpClient,
+    tools: SharedToolExecutor,
 }
 
 impl FeedManager {
-    pub fn new(project_path: Option<String>, mcp_client: SharedMcpClient) -> Self {
+    pub fn new(project_path: Option<String>, tools: SharedToolExecutor) -> Self {
         Self {
             entries: Vec::new(),
             mode: FeedMode::Active,
@@ -98,7 +98,7 @@ impl FeedManager {
             current_task: None,
             feed_event_id: None,
             recent_activities: Vec::new(),
-            mcp_client,
+            tools,
         }
     }
 
@@ -206,19 +206,19 @@ impl FeedManager {
         }
     }
 
-    /// Save feed to project directory as feed.md using MCP
+    /// Save feed to project directory as feed.md using ToolExecutor
     pub async fn save_to_disk(&self) {
         if let Some(project_path) = &self.project_path {
             let feed_path = Path::new(project_path).join("feed.md");
-            // Use MCP to write
-            let mut client = self.mcp_client.lock().await;
+            // Use tools to write
+            let client = self.tools.lock().await;
             // TODO: convert path to string properly
             let path_str = feed_path.to_string_lossy().to_string();
             let content = self.get_feed_content();
             
             if let Err(e) = client.write_file(&path_str, &content).await {
-                // We fallback to tracing in console if MCP fails
-                tracing::error!("Failed to write feed.md via MCP: {}", e);
+                // We fallback to tracing in console if fails
+                tracing::error!("Failed to write feed.md via tools: {}", e);
             }
         }
     }
