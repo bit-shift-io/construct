@@ -3,11 +3,13 @@
 //! Handles the `.new` command.
 //! Scaffolds a new project directory (roadmap.md, tasks.md) via MCP.
 
-use crate::application::state::{BotState, WizardStep, WizardMode};
 use crate::domain::config::AppConfig;
 use crate::domain::traits::ChatProvider;
 use crate::application::project::ProjectManager;
+use crate::application::state::{BotState, WizardStep, WizardMode};
 use anyhow::Result;
+use crate::infrastructure::tools::executor::SharedToolExecutor;
+use crate::application::feed::{FeedManager, FeedMode};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -15,6 +17,7 @@ pub async fn handle_new(
     config: &AppConfig,
     project_manager: &ProjectManager,
     state: &Arc<Mutex<BotState>>,
+    tools: SharedToolExecutor,
     chat: &impl ChatProvider,
     args: &str,
 ) -> Result<()> {
@@ -23,6 +26,9 @@ pub async fn handle_new(
     
     // If no args (or empty string), Start Wizard
     if args.trim().is_empty() {
+        // Initialize Feed
+        let feed = Arc::new(Mutex::new(FeedManager::new(None, tools.clone())));
+        
         {
             let mut guard = state.lock().await;
             let room_state = guard.get_room_state(&chat.room_id());
@@ -30,10 +36,21 @@ pub async fn handle_new(
             room_state.wizard.mode = WizardMode::Project;
             room_state.wizard.step = Some(WizardStep::ProjectName);
             room_state.wizard.data.clear();
+            
+            // Set Feed
+            room_state.feed_manager = Some(feed.clone());
         }
         
-        let msg = crate::strings::wizard::format_wizard_step(&WizardStep::ProjectName, &WizardMode::Project, "", &std::collections::HashMap::new());
-        let _ = chat.send_message(&msg).await;
+        // Initial Wizard Entry
+        // Since FeedMode::Wizard renders "Current Step" for 'running' status entries,
+        // we just add the first question.
+        {
+            let mut f = feed.lock().await;
+            f.mode = FeedMode::Wizard;
+            f.add_entry("Step 1".to_string(), "Please enter a **Project Name**.".to_string());
+            f.update_feed(chat).await?;
+        }
+        
         return Ok(());
     }
     

@@ -81,9 +81,3 @@ pub const NO_ACTIVE_STATE: &str = "No active state for this room.";
 
 pub const WIZARD_CANCELLED: &str = "❌ Wizard cancelled.";
 // Note: We might want a dynamic one for wizard success to show path, but let's stick to what we see in the code or make it dynamic.
-
-pub fn wizard_project_created(path: &str) -> String {
-    format!("✅ **Project Created!**\nLocation: `{path}`\nAgent generating plan...")
-}
-
-pub const PLEASE_CONFIRM_OR_CANCEL: &str = "Please type `.ok` to confirm or `.cancel` to abort.";

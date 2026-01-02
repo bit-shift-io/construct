@@ -15,6 +15,7 @@ pub enum FeedMode {
     Active,
     Squashed,
     Final,
+    Wizard,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,7 +81,7 @@ impl FeedEntry {
 #[derive(Debug, Clone)]
 pub struct FeedManager {
     entries: Vec<FeedEntry>,
-    mode: FeedMode,
+    pub mode: FeedMode,
     _project_path: Option<String>,
     current_task: Option<String>,
     feed_event_id: Option<String>,
@@ -138,6 +139,7 @@ impl FeedManager {
             FeedMode::Active => self.format_active(),
             FeedMode::Squashed => self.format_squashed(),
             FeedMode::Final => self.format_final(),
+            FeedMode::Wizard => self.format_wizard(),
         }
     }
 
@@ -203,6 +205,23 @@ impl FeedManager {
     }
 
 // Unused methods removed (finalize, save_to_disk)
+
+    pub fn format_wizard(&self) -> String {
+        let mut content = String::from("**🧙 Wizard Active**\n\n");
+        
+        // Render completed (history) entries
+        for entry in &self.entries {
+            if entry.status == "success" {
+                // Completed step: "✅ [Question/Label]: Answer"
+                // We'll trust the 'content' field to contain the summary line, e.g. "Project Name: Construct"
+                content.push_str(&format!("✅ {}\n", entry.content));
+            } else if entry.status == "running" {
+                // Active step
+                content.push_str(&format!("\n📝 **Current Step**:\n{}\n", entry.content));
+            }
+        }
+        content
+    }
 
     /// Primary Method: Updates the feed message in the chat
     /// Implements Sticky Logic

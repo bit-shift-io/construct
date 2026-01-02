@@ -14,11 +14,15 @@ use crate::application::feed::FeedManager;
 use crate::infrastructure::tools::executor::SharedToolExecutor;
 use crate::domain::traits::ChatProvider; // Keep ChatProvider for run_task method
 
+use crate::application::state::BotState;
+
+#[derive(Clone)]
 pub struct ExecutionEngine {
     _config: AppConfig,
     llm: Arc<dyn LlmProvider>,
     tools: SharedToolExecutor,
     feed: Arc<Mutex<FeedManager>>,
+    state: Arc<Mutex<BotState>>,
 }
 
 impl ExecutionEngine {
@@ -27,17 +31,19 @@ impl ExecutionEngine {
         llm: Arc<dyn LlmProvider>,
         tools: SharedToolExecutor,
         feed: Arc<Mutex<FeedManager>>,
+        state: Arc<Mutex<BotState>>,
     ) -> Self {
         Self {
             _config: config,
             llm,
             tools,
             feed,
+            state,
         }
     }
 
     /// Primary execution loop
-    pub async fn run_task(&self, chat: &impl ChatProvider, task: &str, agent_name: &str, working_dir: Option<String>) -> Result<()> {
+    pub async fn run_task(&self, chat: &impl ChatProvider, task: &str, agent_name: &str, working_dir: Option<String>) -> Result<bool> {
         // Initialize Feed
         {
             let mut feed = self.feed.lock().await;
@@ -55,6 +61,23 @@ impl ExecutionEngine {
                 break;
             }
             steps += 1;
+
+            // Check for Stop Request
+            {
+                let mut guard = self.state.lock().await;
+                let room = guard.get_room_state(&chat.room_id());
+                if room.stop_requested {
+                    room.stop_requested = false; // Reset flag
+                    let _ = chat.send_notification("🛑 **Task Stopped by User**").await;
+                     // Update Feed to Failed/Stopped
+                    {
+                        let mut feed = self.feed.lock().await;
+                        feed.update_last_entry("Task Stopped".to_string(), false);
+                         let _ = feed.update_feed(chat).await;
+                    }
+                    return Ok(false); // Stopped
+                }
+            }
 
             // 1. Build Context
             // TODO: Extract to ContextEngine
@@ -110,7 +133,7 @@ impl ExecutionEngine {
                         let mut feed = self.feed.lock().await;
                         feed.process_action(&crate::domain::types::AgentAction::Done).await;
                         let _ = feed.update_feed(chat).await;
-                        return Ok(());
+                        return Ok(true); // Completed
                     }
                     crate::domain::types::AgentAction::ShellCommand(cmd) => {
                          // Update Feed
@@ -146,6 +169,6 @@ impl ExecutionEngine {
             }
         }
         
-        Ok(())
+        Ok(true) // Loop finished (max steps or conversational break) - default to success? Or failure?
     }
 }

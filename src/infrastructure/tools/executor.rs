@@ -17,6 +17,9 @@ pub struct ToolConfig {
     /// List of allowed root directories.
     /// All accessed paths must be within one of these roots.
     pub allowed_directories: Vec<String>,
+    pub timeout_default: u64,
+    pub timeout_long: u64,
+    pub long_commands: Vec<String>,
 }
 
 /// Executes tools (shell, fs) securely.
@@ -26,14 +29,24 @@ pub struct ToolExecutor {
 }
 
 impl ToolExecutor {
-    pub fn new(allowed_directories: Vec<String>) -> Self {
+    pub fn new(
+        allowed_directories: Vec<String>,
+        timeout_default: u64,
+        timeout_long: u64,
+        long_commands: Vec<String>
+    ) -> Self {
         Self {
-            config: ToolConfig { allowed_directories },
+            config: ToolConfig { 
+                allowed_directories,
+                timeout_default,
+                timeout_long,
+                long_commands,
+            },
         }
     }
 
     /// Validates that a path is safe to access (contained within allowed roots).
-    /// Returns the canonical absolute path if safe.
+    // ... validate_path (unchanged) ...
     pub fn validate_path(&self, path: &Path) -> Result<PathBuf> {
         // 1. Resolve to absolute path (if it exists)
         let abs_path = if path.exists() {
@@ -106,17 +119,39 @@ impl ToolExecutor {
         cmd.current_dir(safe_cwd);
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
+        cmd.kill_on_drop(true); // Ensure process is killed if timed out (dropped)
+        
+        // Ensure the process is grouped so we can kill its children if necessary (PGID on unix)
+        // Rust std/tokio Command::spawn doesn't easily set pgid without unsafe or ext.
+        // For now, we assume direct killing of the shell process is sufficient to stop most simple tasks.
 
-        // 3. Execute with Timeout
+        // 3. Determine Timeout
+        let binary = command.split_whitespace().next().unwrap_or("");
+        let timeout_sec = if self.config.long_commands.iter().any(|c| c == binary) {
+            self.config.timeout_long
+        } else {
+            self.config.timeout_default
+        };
+
+        // 4. Configure & Spawn
         let child = cmd.spawn().context("Failed to spawn command shell")?;
         
-        // Wait for output (or timeout)
-        let output = tokio::time::timeout(
-            std::time::Duration::from_secs(120),
+        // 5. Wait for output (or timeout)
+        let output_result = tokio::time::timeout(
+            std::time::Duration::from_secs(timeout_sec),
             child.wait_with_output()
-        ).await.context("Command timed out")??;
+        ).await;
 
-        // 4. Format Output
+        let output = match output_result {
+            Ok(io_result) => io_result?,
+            Err(_) => {
+                // Timeout occurred!
+                // Because of kill_on_drop(true), dropping the future (which owns child) kills the process.
+                return Err(anyhow::anyhow!("Command '{}' timed out after {}s", binary, timeout_sec));
+            }
+        };
+
+        // 5. Format Output
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
         

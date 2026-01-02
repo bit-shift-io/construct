@@ -24,6 +24,7 @@ The project follows a clean, hexagonal/layered architecture:
 - **Safe Execution**: All file and shell operations are proxied through an MCP server.
 - **Multi-Provider**: Use the best model for the job (Claude 3.5 Sonnet, GPT-4o, Gemini 1.5 Pro).
 - **Smart Feed**: A "sticky" UI that stays at the bottom of the chat, updating in real-time.
+- **Full Control**: Use `.stop` to instantly abort long-running tasks, and `.ok` to approve sensitive plans before execution.
 
 ## ⚙️ Configuration
 
@@ -88,6 +89,8 @@ agents:
 |Args|
 |---|---|
 | `.task <instruction>` | Start a new autonomous task. |
+| `.ok` | Approve the current plan or step active in the wizard. |
+| `.stop` | **Instantly** halt the current agent task. |
 | `.new <name>` | Scaffold a new project structure. |
 | `.project <path>` | Set the active project for the current room. |
 | `.status` | Show current bot status (Active Project, Model, Task state). |

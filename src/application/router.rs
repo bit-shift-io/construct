@@ -41,7 +41,9 @@ impl CommandRouter {
         }
     }
 
-    pub async fn route(&self, chat: &impl ChatProvider, message: &str, sender: &str) -> Result<()> {
+    pub async fn route<C>(&self, chat: &C, message: &str, sender: &str) -> Result<()> 
+    where C: ChatProvider + Clone + Send + Sync + 'static
+    {
         let msg = message.trim();
         
         // Debug Log (Moved to top)
@@ -69,13 +71,40 @@ impl CommandRouter {
         };
 
         if is_wizard_active {
-            commands::wizard::handle_step(
+            let result = commands::wizard::handle_step(
                 &self.config,
                 &self.state,
                 &self.project_manager,
                 chat,
                 msg
             ).await?;
+
+            if let commands::wizard::WizardAction::TransitionToTask { prompt, workdir } = result {
+                 // Transition to Task!
+                 // Reuse feed from RoomState
+                 let feed = {
+                     let guard = self.state.lock().await;
+                     let room = guard.rooms.get(&chat.room_id());
+                     room.and_then(|r| r.feed_manager.clone())
+                         .unwrap_or_else(|| Arc::new(Mutex::new(FeedManager::new(Some(workdir.clone()), self.tools.clone()))))
+                 };
+                 
+                 // Update Feed Mode to Active (from Wizard)
+                 {
+                     let mut f = feed.lock().await;
+                     f.initialize("Initializing Project Content...".to_string());
+                 }
+
+                 let engine = ExecutionEngine::new(
+                     self.config.clone(),
+                     self.llm.clone(),
+                     self.tools.clone(),
+                     feed, 
+                     self.state.clone(),
+                 );
+                 
+                 commands::task::handle_task(&self.state, &engine, chat, &prompt, Some(workdir)).await?;
+            }
             return Ok(());
         }
 
@@ -102,32 +131,100 @@ impl CommandRouter {
         let (cmd, args) = (cmd_preview, args_preview);
 
         match cmd {
+            ".ok" | ".continue" => {
+                 // Check if we are in a project and have a plan?
+                 // Or just assume the user wants to continue the last intention?
+                 // For now, let's treat it as "Execute the plan" if we are in a project.
+                 
+                 let workdir = {
+                     let guard = self.state.lock().await;
+                     let room = guard.rooms.get(&chat.room_id());
+                     room.and_then(|r| r.current_working_dir.clone())
+                 };
+                 
+                 if let Some(wd) = workdir {
+                     // Check if plan.md exists?
+                     // Verify via tools
+                     let plan_exists = {
+                         let _t = self.tools.lock().await;
+                         let _path = std::path::Path::new(&wd).join("plan.md");
+                         // We can't easily check existence with current ToolExecutor without read/list.
+                         // Let's just assume and try to run.
+                         // Or use "ls"?
+                         true 
+                     };
+
+                     if plan_exists {
+                          // Re-initialize Engine
+                         let feed = {
+                             let guard = self.state.lock().await;
+                             let room = guard.rooms.get(&chat.room_id());
+                             room.and_then(|r| r.feed_manager.clone())
+                                 .unwrap_or_else(|| Arc::new(Mutex::new(FeedManager::new(Some(wd.clone()), self.tools.clone()))))
+                         };
+                         
+                         let engine = ExecutionEngine::new(
+                             self.config.clone(),
+                             self.llm.clone(),
+                             self.tools.clone(),
+                             feed, 
+                             self.state.clone(),
+                         );
+                         
+                         let _ = chat.send_message("🚀 **Executing Plan**...").await;
+                         // Execute Plan
+                         commands::task::handle_task(&self.state, &engine, chat, "Execute the implementation details described in `plan.md`. Implement the code.", Some(wd)).await?;
+                     } else {
+                         let _ = chat.send_message("No active project or plan found to continue.").await;
+                     }
+                 } else {
+                      let _ = chat.send_message("You are not in a project directory.").await;
+                 }
+            }
             ".new" => {
-                commands::new::handle_new(&self.config, &self.project_manager, &self.state, chat, args).await?;
+                commands::new::handle_new(&self.config, &self.project_manager, &self.state, self.tools.clone(), chat, args).await?;
             }
             ".task" => {
-                // Initialize Engine
-                
-                // Determine working directory from RoomState or Default
-                let workdir = {
-                    let guard = self.state.lock().await;
-                    let room_state = guard.rooms.get(&chat.room_id());
-                    room_state.and_then(|r| r.current_working_dir.clone())
-                        .or_else(|| room_state.and_then(|r| r.current_project_path.clone()))
-                        .or_else(|| self.config.system.projects_dir.clone())
-                        .or_else(|| Some(".".to_string()))
-                };
+                if args.trim().is_empty() {
+                    commands::task::start_task_wizard(&self.state, self.tools.clone(), chat).await?;
+                } else {
+                    // Initialize Engine
+                    
+                    // Determine working directory from RoomState or Default
+                    let (workdir, existing_feed) = {
+                        let guard = self.state.lock().await;
+                        let room_state = guard.rooms.get(&chat.room_id());
+                        let path = room_state.and_then(|r| r.current_working_dir.clone())
+                            .or_else(|| room_state.and_then(|r| r.current_project_path.clone()))
+                            .or_else(|| self.config.system.projects_dir.clone())
+                            .or_else(|| Some(".".to_string())).unwrap_or_else(|| ".".to_string());
+                        let feed = room_state.and_then(|r| r.feed_manager.clone());
+                        (path, feed)
+                    };
 
-                // Create Feed
-                let feed = Arc::new(Mutex::new(FeedManager::new(workdir.clone(), self.tools.clone())));
-                let engine = ExecutionEngine::new(
-                    self.config.clone(),
-                    self.llm.clone(),
-                    self.tools.clone(),
-                    feed, 
-                );
-                
-                commands::task::handle_task(&engine, chat, args, workdir).await?;
+                    // Create Feed or Reuse
+                    let feed = existing_feed.unwrap_or_else(|| Arc::new(Mutex::new(FeedManager::new(Some(workdir.clone()), self.tools.clone()))));
+                    
+                    // Store feed in RoomState if not present?
+                    // Ideally yes, so it persists for wizard/other flows
+                    {
+                        let mut guard = self.state.lock().await;
+                        let room = guard.get_room_state(&chat.room_id());
+                        if room.feed_manager.is_none() {
+                            room.feed_manager = Some(feed.clone());
+                        }
+                    }
+
+                    let engine = ExecutionEngine::new(
+                        self.config.clone(),
+                        self.llm.clone(),
+                        self.tools.clone(),
+                        feed,
+                        self.state.clone(), 
+                    );
+                    
+                    commands::task::handle_task(&self.state, &engine, chat, args, Some(workdir)).await?;
+                }
             }
             ".run" | ".exec" => {
                  commands::admin::handle_admin(
@@ -156,6 +253,24 @@ impl CommandRouter {
             }
             ".read" => {
                 commands::misc::handle_read(self.tools.clone(), chat, args).await?;
+            }
+            ".stop" => {
+                 let mut guard = self.state.lock().await;
+                 let room = guard.get_room_state(&chat.room_id());
+                 room.stop_requested = true;
+                 
+                 // Instant Abort
+                 if let Some(handle_lock) = &room.task_handle {
+                     let mut handle = handle_lock.lock().await;
+                     if let Some(h) = handle.take() {
+                         h.abort();
+                         let _ = chat.send_message("🛑 **Task Stopped Instantly (Aborted)**").await;
+                     } else {
+                         let _ = chat.send_message("🛑 Stop requested (Flag set, no active handle).").await;
+                     }
+                 } else {
+                     let _ = chat.send_message("🛑 Stop requested (Flag set).").await;
+                 }
             }
              _ => {
                  let _ = chat.send_message(crate::strings::messages::UNKNOWN_COMMAND).await;

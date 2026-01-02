@@ -39,29 +39,26 @@ pub struct CommandsConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct TimeoutConfig {
-    #[serde(default = "default_short_timeout")]
-    pub short: u64,
-    #[serde(default = "default_medium_timeout")]
-    pub medium: u64,
+    #[serde(default = "default_timeout")]
+    pub default: u64,
     #[serde(default = "default_long_timeout")]
     pub long: u64,
+    #[serde(default)]
+    pub long_commands: Vec<String>,
 }
 
 impl Default for TimeoutConfig {
     fn default() -> Self {
         Self {
-            short: default_short_timeout(),
-            medium: default_medium_timeout(),
+            default: default_timeout(),
             long: default_long_timeout(),
+            long_commands: Vec::new(),
         }
     }
 }
 
-fn default_short_timeout() -> u64 {
+fn default_timeout() -> u64 {
     30
-}
-fn default_medium_timeout() -> u64 {
-    120
 }
 fn default_long_timeout() -> u64 {
     600

@@ -95,7 +95,12 @@ async fn main() -> Result<()> {
         allowed_dirs.push(proj_dir.clone());
     }
     
-    let tools = Arc::new(Mutex::new(ToolExecutor::new(allowed_dirs)));
+    let tools = Arc::new(Mutex::new(ToolExecutor::new(
+        allowed_dirs, 
+        config.commands.timeouts.default,
+        config.commands.timeouts.long,
+        config.commands.timeouts.long_commands.clone()
+    )));
     
     // LLM
     let llm = Arc::new(LlmClient::new(config.clone()));

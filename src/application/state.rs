@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
 use tokio::sync::watch;
+use tokio::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum WizardStep {
@@ -74,9 +75,11 @@ pub struct RoomState {
     #[serde(default)]
     pub feed_event_id: Option<String>,
     #[serde(skip)]
-    pub _feed_manager: Option<FeedManager>,
+    pub feed_manager: Option<Arc<Mutex<FeedManager>>>,
     #[serde(skip)]
     pub _input_tx: Option<tokio::sync::mpsc::Sender<String>>,
+    #[serde(skip)]
+    pub task_handle: Option<Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>>,
 }
 
 impl RoomState {
