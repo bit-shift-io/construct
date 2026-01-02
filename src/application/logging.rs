@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+#![allow(dead_code)]
 //! # Logging Service
 //!
 //! A centralized logging service that can dispatch log messages to multiple sinks (Console, File, Chat).

@@ -3,3 +3,4 @@
 /prompts
 /docs
 !README.md
+*.txt

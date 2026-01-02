@@ -1,5 +1,7 @@
+#![allow(dead_code)]
 //! Simple LLM client for multiple providers with native caching support
 
+#![allow(dead_code)]
 //! # LLM Client
 //!
 //! Provides the `Client` struct, which acts as the main entry point for LLM interactions.

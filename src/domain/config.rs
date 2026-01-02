@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! # Configuration
 //!
 //! Manages the loading and parsing of the application's configuration file (`config.yaml`).

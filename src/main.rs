@@ -37,7 +37,7 @@ use crate::infrastructure::matrix::MatrixService;
 use crate::infrastructure::llm::Client as LlmClient;
 
 static CONFIG: OnceLock<AppConfig> = OnceLock::new();
-static ROUTER: OnceLock<Arc<CommandRouter>> = OnceLock::new();
+// static ROUTER: OnceLock<Arc<CommandRouter>> = OnceLock::new();
 
 #[tokio::main]
 async fn main() -> Result<()> {

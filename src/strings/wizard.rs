@@ -18,19 +18,19 @@ pub fn format_wizard_step(
     // Logic to select title/description based on step
     match step {
         WizardStep::ProjectName => {
-             output.push_str("### 🧙 New Project Wizard\n\n**Step 1: Project Name**\n\nPlease enter a name for your new project.");
+             output.push_str("### 🧙 New Project Wizard\n**Step 1: Project Name**\nPlease enter a name for your new project.");
         }
         WizardStep::Description => {
-             output.push_str("### 📝 Project Description\n\n**Step 2: Description**\n\nDescribe your project.\n `.ok` to confirm.");
+             output.push_str("### 📝 Project Description\n**Step 2: Description**\nDescribe your project.\n `.ok` to confirm.");
         }
         WizardStep::TaskDescription => {
-             output.push_str("### 📋 New Task\n\n**Describe the task**\n\nWhat would you like the agent to do?");
+             output.push_str("### 📋 New Task\n**Describe the task**\nWhat would you like the agent to do?");
         }
         WizardStep::Confirmation => {
-             output.push_str("### ✅ Confirmation\n\nReady to proceed? Type `.ok` to start or `.cancel` to abort.");
+             output.push_str("### ✅ Confirmation\nReady to proceed? Type `.ok` to start or `.cancel` to abort.");
         }
         _ => {
-             output.push_str("### Wizard\n\nUnknown step.");
+             output.push_str("### Wizard\nUnknown step.");
         }
     }
     

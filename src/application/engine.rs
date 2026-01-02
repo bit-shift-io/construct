@@ -15,7 +15,7 @@ use crate::infrastructure::tools::executor::SharedToolExecutor;
 use crate::domain::traits::ChatProvider; // Keep ChatProvider for run_task method
 
 pub struct ExecutionEngine {
-    config: AppConfig,
+    _config: AppConfig,
     llm: Arc<dyn LlmProvider>,
     tools: SharedToolExecutor,
     feed: Arc<Mutex<FeedManager>>,
@@ -29,7 +29,7 @@ impl ExecutionEngine {
         feed: Arc<Mutex<FeedManager>>,
     ) -> Self {
         Self {
-            config,
+            _config: config,
             llm,
             tools,
             feed,

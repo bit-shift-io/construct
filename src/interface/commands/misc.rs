@@ -19,10 +19,8 @@ pub async fn handle_status(
     
     if let Some(s) = room_state {
         let msg = crate::strings::messages::room_status_msg(
-            &chat.room_id(),
             s.current_project_path.as_deref().unwrap_or("None"),
             s.current_working_dir.as_deref().unwrap_or("Default"),
-            s.active_task.as_deref().unwrap_or("None"),
             s.active_model.as_deref().unwrap_or("Default"),
             s.active_agent.as_deref().unwrap_or("Default")
         );

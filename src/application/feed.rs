@@ -9,7 +9,6 @@ use crate::domain::types::AgentAction;
 use anyhow::Result;
 use chrono::Local;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum FeedMode {
@@ -82,11 +81,11 @@ impl FeedEntry {
 pub struct FeedManager {
     entries: Vec<FeedEntry>,
     mode: FeedMode,
-    project_path: Option<String>,
+    _project_path: Option<String>,
     current_task: Option<String>,
     feed_event_id: Option<String>,
     recent_activities: Vec<String>,
-    tools: SharedToolExecutor,
+    _tools: SharedToolExecutor,
 }
 
 impl FeedManager {
@@ -94,11 +93,11 @@ impl FeedManager {
         Self {
             entries: Vec::new(),
             mode: FeedMode::Active,
-            project_path,
+            _project_path: project_path,
             current_task: None,
             feed_event_id: None,
             recent_activities: Vec::new(),
-            tools,
+            _tools: tools,
         }
     }
 
@@ -133,9 +132,6 @@ impl FeedManager {
         self.mode = FeedMode::Squashed;
     }
 
-    pub fn finalize(&mut self) {
-        self.mode = FeedMode::Final;
-    }
 
     fn get_feed_content(&self) -> String {
         match self.mode {
@@ -206,22 +202,7 @@ impl FeedManager {
         }
     }
 
-    /// Save feed to project directory as feed.md using ToolExecutor
-    pub async fn save_to_disk(&self) {
-        if let Some(project_path) = &self.project_path {
-            let feed_path = Path::new(project_path).join("feed.md");
-            // Use tools to write
-            let client = self.tools.lock().await;
-            // TODO: convert path to string properly
-            let path_str = feed_path.to_string_lossy().to_string();
-            let content = self.get_feed_content();
-            
-            if let Err(e) = client.write_file(&path_str, &content).await {
-                // We fallback to tracing in console if fails
-                tracing::error!("Failed to write feed.md via tools: {}", e);
-            }
-        }
-    }
+// Unused methods removed (finalize, save_to_disk)
 
     /// Primary Method: Updates the feed message in the chat
     /// Implements Sticky Logic

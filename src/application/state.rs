@@ -55,7 +55,7 @@ pub struct RoomState {
     #[serde(default)]
     pub is_task_completed: bool,
     #[serde(skip)]
-    pub abort_handle: Option<Arc<watch::Sender<bool>>>,
+    pub _abort_handle: Option<Arc<watch::Sender<bool>>>,
     #[serde(default)]
     pub wizard: WizardState,
     #[serde(default)]
@@ -74,22 +74,12 @@ pub struct RoomState {
     #[serde(default)]
     pub feed_event_id: Option<String>,
     #[serde(skip)]
-    pub feed_manager: Option<FeedManager>,
+    pub _feed_manager: Option<FeedManager>,
     #[serde(skip)]
-    pub input_tx: Option<tokio::sync::mpsc::Sender<String>>,
+    pub _input_tx: Option<tokio::sync::mpsc::Sender<String>>,
 }
 
 impl RoomState {
-    /// Cleans up temporary state after task completion.
-    pub fn cleanup_after_task(&mut self) {
-        self.pending_command = None;
-        self.pending_agent_response = None;
-        self.last_command = None;
-        self.command_retry_count = 0;
-        self.is_task_completed = false;
-        self.feed_event_id = None;
-        self.input_tx = None;
-    }
 
 
 }

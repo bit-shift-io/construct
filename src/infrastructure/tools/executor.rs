@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+#![allow(dead_code)]
 //! # Tool Executor
 //!
 //! Handles safe execution of shell commands and filesystem operations.

@@ -3,17 +3,6 @@
 //! Contains constant strings and format functions for user-facing messages.
 //! Includes error messages, status updates, and notification templates.
 
-pub fn model_set(name: &str) -> String {
-    format!("✅ **Model set to**: `{name}`")
-}
-
-pub const WELCOME: &str = "👋 Welcome! I am your AI assistant.";
-
-// ... (Removed unused strings)
-
-pub fn command_timed_out(duration: std::time::Duration) -> String {
-    format!("Command timed out after {duration:?}. Consider breaking this into smaller steps or running in the background.")
-}
 // New Strings
 pub const AUTH_DENIED: &str = "🚫 **Authorization Denied**.";
 pub const UNKNOWN_COMMAND: &str = "❓ Unknown command.";
@@ -78,27 +67,23 @@ pub fn file_read_failed(err: &str) -> String {
 }
 
 pub fn room_status_msg(
-    id: &str,
     project: &str,
     cwd: &str,
-    task: &str,
     model: &str,
     agent: &str
 ) -> String {
     format!(
-        "**🤖 Room Status**\n\n**ID**: `{id}`\n**Project**: `{project}`\n**CWD**: `{cwd}`\n**Task**: `{task}`\n**Model**: `{model}`\n**Agent**: `{agent}`"
+        "**Project**: `{project}`\n**CWD**: `{cwd}`\n**Model**: `{model}`\n**Agent**: `{agent}`"
     )
 }
 
 pub const NO_ACTIVE_STATE: &str = "No active state for this room.";
 
 pub const WIZARD_CANCELLED: &str = "❌ Wizard cancelled.";
-pub const WIZARD_CREATING_PROJECT: &str = "Creating project...";
-pub const WIZARD_PROJECT_CREATED_MSG: &str = "✅ **Project Created!**\n\nYou can now use `.task <instruction>` to start working."; 
 // Note: We might want a dynamic one for wizard success to show path, but let's stick to what we see in the code or make it dynamic.
 
 pub fn wizard_project_created(path: &str) -> String {
-    format!("✅ **Project Created!**\n\nLocation: `{path}`\n\nYou can now use `.task <instruction>` to start working.")
+    format!("✅ **Project Created!**\nLocation: `{path}`\nAgent generating plan...")
 }
 
 pub const PLEASE_CONFIRM_OR_CANCEL: &str = "Please type `.ok` to confirm or `.cancel` to abort.";

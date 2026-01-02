@@ -5,62 +5,7 @@
 
 pub const SYSTEM: &str = include_str!("../../prompts/system.md");
 
-pub const TASK_INSTRUCTIONS: &str = concat!(
-    "1. Use the 'Project Roadmap' above for understanding the big picture and constraints.\n",
-    "2. Your scope is STRICTLY limited to the 'Task' described above. Do NOT try to complete other roadmap items.\n",
-    "3. Generate two files:\n",
-    "   - `plan.md`: A detailed but CONCISE technical plan for THIS specific task.\n",
-    "   - `tasks.md`: A checklist of the subtasks for THIS specific task.\n"
-);
-
-pub const TASK_FORMAT: &str = concat!(
-    "plan.md\n",
-    "```markdown\n",
-    "...content...\n",
-    "```\n\n",
-    "tasks.md\n",
-    "```markdown\n",
-    "...content...\n",
-    "```\n"
-);
-
-pub const NEW_PROJECT_INSTRUCTIONS: &str = "4. **NEW PROJECT DETECTED**: You MUST also generate `roadmap.md` based on the task requirements to replace the default placeholders.\n";
-
-pub const NEW_PROJECT_FORMAT: &str = concat!(
-    "\nroadmap.md\n",
-    "```markdown\n",
-    "...content...\n",
-    "```\n"
-);
-
-pub fn modify_plan(system: &str, task: &str, plan: &str, feedback: &str) -> String {
-    format!(
-        "{system}\n\nOriginal Task: {task}\n\nCurrent Plan:\n{plan}\n\nFeedback: {feedback}\n\nPlease update the plan.md based on the feedback.\n\nIMPORTANT: Return the content of plan.md in a code block.\n"
-    )
-}
-
-pub fn task_requirements_prompt(requirements: &str) -> String {
-    format!("Task Requirements:\n\n{requirements}")
-}
-
-pub fn new_project_prompt(name: &str, requirements: &str, workdir: &str) -> String {
-    format!(
-        "Create a new project named '{name}'. \n\nGoal: Comprehensive implementation of the following requirements.\n\nRequirements:\n{requirements}\n\nIMPORTANT: The project directory is ALREADY created. You are ALREADY inside it (`{workdir}`). Do NOT run `mkdir` or `cd`."
-    )
-}
-
-pub const ROADMAP_TEMPLATE: &str = "# Roadmap\n\n- [ ] Initial Setup";
-pub const CHANGELOG_TEMPLATE: &str = "# Changelog\n\n## 0.1.0\n- Initialized";
-
-pub fn roadmap_context(content: &str) -> String {
-    format!("\n\n### Project Roadmap (Context Only)\n{content}\n")
-}
-
-pub fn initial_history_context(task: &str, plan: &str, tasks: &str, workdir: &str) -> String {
-    format!(
-        "Task: {task}\n\nCurrent Plan:\n{plan}\n\nTasks Checklist:\n{tasks}\n\nYou are executing this plan. We will do this step-by-step.\n\nYou are currently in directory: {workdir}\n"
-    )
-}
+// Unused prompts removed
 
 pub fn interactive_turn(cwd: &str, roadmap: &str, tasks: &str) -> String {
     format!(

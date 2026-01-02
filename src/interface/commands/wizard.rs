@@ -98,8 +98,6 @@ pub async fn handle_step(
     // Perform Creation if needed
     if let Some(name) = create_params {
         let parent_dir = config.system.projects_dir.clone().unwrap_or(".".to_string());
-        
-        let _ = chat.send_notification(crate::strings::messages::WIZARD_CREATING_PROJECT).await;
         let creation_result = project_manager.create_project(&name, &parent_dir).await;
 
         // Re-acquire lock to update room state (CWD)
