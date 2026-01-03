@@ -24,6 +24,7 @@ use matrix_sdk::{
         message::SyncRoomMessageEvent,
     },
 };
+use std::collections::HashSet;
 use std::fs;
 use std::sync::{Arc, OnceLock};
 use tokio::sync::Mutex;
@@ -89,8 +90,8 @@ async fn main() -> Result<()> {
     // 3. Initialize Infrastructure
     // Tool Executor (replacing MCP)
     // Gather allowed directories from config
-    let mut allowed_dirs = config.system.allowed_directories.clone();
-    // Add projects dir if configured
+    // Sandbox to projects_dir only (as per user request)
+    let mut allowed_dirs = Vec::new();
     if let Some(proj_dir) = &config.system.projects_dir {
         allowed_dirs.push(proj_dir.clone());
     }
@@ -128,6 +129,22 @@ async fn main() -> Result<()> {
     let startup_state = state.clone();
 
     // Startup Announcement Task
+    // Collect allowed channels from config
+    let mut allowed_startup_rooms = HashSet::new();
+    for bridges in config.bridges.values() {
+        for bridge in bridges {
+            if let Some(service) = &bridge.service {
+                if service == "matrix" {
+                    if let Some(channel) = &bridge.channel {
+                        allowed_startup_rooms.insert(channel.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    // Spawn Startup Announcement (if any)
+    let startup_config = config.clone();
     tokio::spawn(async move {
         // Wait for initial sync to populate state (Retry for up to 60s)
         let timeout = std::time::Duration::from_secs(60);
@@ -145,8 +162,11 @@ async fn main() -> Result<()> {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 
                 for room in rooms {
+                    if !allowed_startup_rooms.contains(room.room_id().as_str()) {
+                        continue;
+                    }
                     let chat = MatrixService::new(room.clone());
-                    if let Err(e) = crate::interface::commands::misc::handle_status(&startup_state, &chat).await {
+                    if let Err(e) = crate::interface::commands::misc::handle_status(&startup_config, &startup_state, &chat).await {
                         tracing::error!("Failed to send startup status to room {}: {}", room.room_id(), e);
                     }
                 }
@@ -180,7 +200,7 @@ async fn main() -> Result<()> {
 
                 if let matrix_sdk::ruma::events::room::message::MessageType::Text(text_content) = &original_msg.content.msgtype {
                      let body = &text_content.body;
-                     tracing::info!("Received message from {}: {}", original_msg.sender, body);
+                     tracing::info!("Received message from {}: \n{}", original_msg.sender, body);
                      if original_msg.sender == room.own_user_id() { return; }
                      
                      let chat = make_chat(room);

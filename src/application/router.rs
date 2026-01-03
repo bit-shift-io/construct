@@ -86,7 +86,7 @@ impl CommandRouter {
                      let guard = self.state.lock().await;
                      let room = guard.rooms.get(&chat.room_id());
                      room.and_then(|r| r.feed_manager.clone())
-                         .unwrap_or_else(|| Arc::new(Mutex::new(FeedManager::new(Some(workdir.clone()), self.tools.clone()))))
+                         .unwrap_or_else(|| Arc::new(Mutex::new(FeedManager::new(Some(workdir.clone()), self.config.system.projects_dir.clone(), self.tools.clone()))))
                  };
                  
                  // Update Feed Mode to Active (from Wizard)
@@ -131,7 +131,12 @@ impl CommandRouter {
         let (cmd, args) = (cmd_preview, args_preview);
 
         match cmd {
-            ".ok" | ".continue" => {
+            ".ok" | ".continue" | ".approve" | ".yes" => {
+                 // 1. Try handling pending approval
+                 if commands::misc::try_handle_approval(&self.state, chat, true).await? {
+                     return Ok(());
+                 }
+
                  // Check if we are in a project and have a plan?
                  // Or just assume the user wants to continue the last intention?
                  // For now, let's treat it as "Execute the plan" if we are in a project.
@@ -160,7 +165,7 @@ impl CommandRouter {
                              let guard = self.state.lock().await;
                              let room = guard.rooms.get(&chat.room_id());
                              room.and_then(|r| r.feed_manager.clone())
-                                 .unwrap_or_else(|| Arc::new(Mutex::new(FeedManager::new(Some(wd.clone()), self.tools.clone()))))
+                                 .unwrap_or_else(|| Arc::new(Mutex::new(FeedManager::new(Some(wd.clone()), self.config.system.projects_dir.clone(), self.tools.clone()))))
                          };
                          
                          let engine = ExecutionEngine::new(
@@ -186,7 +191,7 @@ impl CommandRouter {
             }
             ".task" => {
                 if args.trim().is_empty() {
-                    commands::task::start_task_wizard(&self.state, self.tools.clone(), chat).await?;
+                    commands::task::start_task_wizard(&self.config, &self.state, self.tools.clone(), chat).await?;
                 } else {
                     // Initialize Engine
                     
@@ -203,7 +208,7 @@ impl CommandRouter {
                     };
 
                     // Create Feed or Reuse
-                    let feed = existing_feed.unwrap_or_else(|| Arc::new(Mutex::new(FeedManager::new(Some(workdir.clone()), self.tools.clone()))));
+                    let feed = existing_feed.unwrap_or_else(|| Arc::new(Mutex::new(FeedManager::new(Some(workdir.clone()), self.config.system.projects_dir.clone(), self.tools.clone()))));
                     
                     // Store feed in RoomState if not present?
                     // Ideally yes, so it persists for wizard/other flows
@@ -246,7 +251,7 @@ impl CommandRouter {
                 commands::project::handle_list(&self.config, &self.project_manager, chat).await?;
             }
             ".status" => {
-                commands::misc::handle_status(&self.state, chat).await?;
+                commands::misc::handle_status(&self.config, &self.state, chat).await?;
             }
             ".ask" => {
                 commands::misc::handle_ask(&self.state, self.tools.clone(), &self.llm, chat, args).await?;
@@ -272,11 +277,19 @@ impl CommandRouter {
                      let _ = chat.send_message("🛑 Stop requested (Flag set).").await;
                  }
             }
+            ".deny" | ".no" | ".cancel" => {
+                 if commands::misc::try_handle_approval(&self.state, chat, false).await? {
+                     return Ok(());
+                 }
+                 if cmd != ".cancel" {
+                    let _ = chat.send_message("No pending approval to deny.").await;
+                 }
+            }
              _ => {
                  let _ = chat.send_message(crate::strings::messages::UNKNOWN_COMMAND).await;
              }
         }
-
+        
         Ok(())
     }
 }

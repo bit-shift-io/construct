@@ -143,6 +143,44 @@ impl ExecutionEngine {
                             let _ = feed.update_feed(chat).await;
                         }
 
+                        // Safety Check
+                        let projects_root = {
+                             let f = self.feed.lock().await;
+                             f.projects_root()
+                        };
+                        
+                        // If checking safety fails, ask for permission
+                        if !crate::application::utils::check_command_safety(&cmd, projects_root.as_deref()) {
+                             let (tx, rx) = tokio::sync::oneshot::channel();
+                             
+                             {
+                                  let mut guard = self.state.lock().await;
+                                  let room = guard.get_room_state(&chat.room_id());
+                                  room.pending_approval_tx = Some(Arc::new(Mutex::new(Some(tx))));
+                             }
+                             
+                             let _ = chat.send_notification(&format!("⚠️ **Security Alert**: Command `{}` uses absolute path outside project root.\nReply `.approve` to allow, `.deny` to skip.", cmd)).await;
+                             
+                             // Wait for approval
+                             match rx.await {
+                                 Ok(true) => {
+                                      let _ = chat.send_notification("✅ Command Approved.").await;
+                                 },
+                                 Ok(false) | Err(_) => {
+                                      let _ = chat.send_message("🚫 Command Denied or Cancelled.").await;
+                                      history.push_str(&format!("\nAction Skipped: Command `{}` denied by user.\n", cmd));
+                                      
+                                      // Update feed to show skipped
+                                      {
+                                          let mut feed = self.feed.lock().await;
+                                          feed.update_last_entry("Command Denied".to_string(), false);
+                                          let _ = feed.update_feed(chat).await;
+                                      }
+                                      continue;
+                                 }
+                             }
+                        }
+
                         // Execute via ToolExecutor
                         // We use a simplified direct execution for now, assuming ToolExecutor handles safety/timeouts logic
                         let client = self.tools.lock().await;

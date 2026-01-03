@@ -42,7 +42,8 @@ pub async fn handle_admin(
                 let path_str = safe_path.to_string_lossy().to_string();
                 room_state.current_working_dir = Some(path_str.clone());
                 state_guard.save();
-                let _ = chat.send_message(&crate::strings::messages::directory_changed_msg(&path_str)).await;
+                let sanitized_path = crate::application::utils::sanitize_path(&path_str, config.system.projects_dir.as_deref());
+                let _ = chat.send_message(&crate::strings::messages::directory_changed_msg(&sanitized_path)).await;
             }
             Err(e) => {
                  let _ = chat.send_notification(&crate::strings::messages::invalid_directory(&e.to_string())).await;
@@ -64,7 +65,8 @@ pub async fn handle_admin(
     let client = tools.lock().await;
     match client.execute_command(command, Path::new(&workdir)).await {
         Ok(output) => {
-            let _ = chat.send_message(&crate::strings::messages::command_output_format(&workdir, command, &output)).await;
+            let sanitized_wd = crate::application::utils::sanitize_path(&workdir, config.system.projects_dir.as_deref());
+            let _ = chat.send_message(&crate::strings::messages::command_output_format(&sanitized_wd, command, &output)).await;
         }
         Err(e) => {
             let _ = chat.send_notification(&crate::strings::messages::command_failed(&e.to_string())).await;

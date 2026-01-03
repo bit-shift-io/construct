@@ -10,7 +10,9 @@ use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use crate::domain::config::AppConfig;
 pub async fn handle_status(
+    config: &AppConfig,
     state: &Arc<Mutex<BotState>>,
     chat: &impl ChatProvider,
 ) -> Result<()> {
@@ -18,9 +20,18 @@ pub async fn handle_status(
     let room_state = state_guard.rooms.get(&chat.room_id());
     
     if let Some(s) = room_state {
-        let msg = crate::strings::messages::room_status_msg(
+        let project = crate::application::utils::sanitize_path(
             s.current_project_path.as_deref().unwrap_or("None"),
+            config.system.projects_dir.as_deref()
+        );
+        let cwd = crate::application::utils::sanitize_path(
             s.current_working_dir.as_deref().unwrap_or("Default"),
+            config.system.projects_dir.as_deref()
+        );
+        
+        let msg = crate::strings::messages::room_status_msg(
+            &project,
+            &cwd,
             s.active_model.as_deref().unwrap_or("Default"),
             s.active_agent.as_deref().unwrap_or("Default")
         );
@@ -124,4 +135,45 @@ pub async fn handle_read(
         }
     }
     Ok(())
+}
+
+/// Attempts to handle a pending approval request.
+/// Returns true if an approval was pending and handled, false otherwise.
+pub async fn try_handle_approval(
+    state: &Arc<Mutex<BotState>>,
+    _chat: &impl ChatProvider, // chat not strictly needed if we just trigger channel, seeing as engine handles notification
+    approved: bool,
+) -> Result<bool> {
+    let mut guard = state.lock().await;
+    // We use a dummy key if chat isn't passed, but we need room_id. 
+    // Wait, signature needs chat to get room_id.
+    // (chat param above is correct)
+    
+    // Actually, passing chat is fine.
+    // Let's fix the guard access.
+    // We need room_id.
+    // The simplified signature above took `_chat` which is generic.
+    // We can't access `chat.room_id()` if `_chat` is effectively ignored or typed generic without bounds in this snippet?
+    // Ah, impl ChatProvider is fine.
+    
+    // Re-do body:
+    let room_id = _chat.room_id();
+    let room = guard.get_room_state(&room_id);
+    
+    if let Some(wrapper) = &room.pending_approval_tx {
+         let mut tx_guard = wrapper.lock().await;
+         if let Some(tx) = tx_guard.take() {
+             let _ = tx.send(approved);
+             // Optional: Clean up room.pending_approval_tx = None? 
+             // Ideally yes, but we are holding state lock?
+             // Yes, `guard` matches `room`.
+             // We can set room.pending_approval_tx = None;
+             return Ok(true); 
+         }
+    }
+    // Clean up if empty?
+    if room.pending_approval_tx.is_some() {
+        room.pending_approval_tx = None;
+    }
+    Ok(false)
 }

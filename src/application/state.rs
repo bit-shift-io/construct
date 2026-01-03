@@ -79,6 +79,8 @@ pub struct RoomState {
     #[serde(skip)]
     pub _input_tx: Option<tokio::sync::mpsc::Sender<String>>,
     #[serde(skip)]
+    pub pending_approval_tx: Option<Arc<Mutex<Option<tokio::sync::oneshot::Sender<bool>>>>>,
+    #[serde(skip)]
     pub task_handle: Option<Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>>,
 }
 

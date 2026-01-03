@@ -27,9 +27,8 @@ pub async fn handle_new(
     // If no args (or empty string), Start Wizard
     if args.trim().is_empty() {
         // Initialize Feed
-        let feed = Arc::new(Mutex::new(FeedManager::new(None, tools.clone())));
-        
-        {
+    let feed = Arc::new(Mutex::new(FeedManager::new(None, config.system.projects_dir.clone(), tools.clone())));
+    {
             let mut guard = state.lock().await;
             let room_state = guard.get_room_state(&chat.room_id());
             room_state.wizard.active = true;
@@ -47,7 +46,7 @@ pub async fn handle_new(
         {
             let mut f = feed.lock().await;
             f.mode = FeedMode::Wizard;
-            f.add_entry("Step 1".to_string(), "Please enter a **Project Name**.".to_string());
+            f.add_prompt("Please enter a **Project Name**.".to_string());
             f.update_feed(chat).await?;
         }
         

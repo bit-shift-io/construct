@@ -12,7 +12,10 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use anyhow::Result;
 
+use crate::domain::config::AppConfig;
+
 pub async fn start_task_wizard(
+    config: &AppConfig,
     state: &Arc<Mutex<BotState>>,
     tools: SharedToolExecutor,
     chat: &impl ChatProvider,
@@ -25,7 +28,7 @@ pub async fn start_task_wizard(
         room_state.current_working_dir.clone().unwrap_or_else(|| ".".to_string())
     };
 
-    let feed = Arc::new(Mutex::new(FeedManager::new(Some(workdir), tools.clone())));
+    let feed = Arc::new(Mutex::new(FeedManager::new(Some(workdir), config.system.projects_dir.clone(), tools.clone())));
     
     {
         let mut guard = state.lock().await;
@@ -45,7 +48,7 @@ pub async fn start_task_wizard(
     {
         let mut f = feed.lock().await;
         f.mode = FeedMode::Wizard;
-        f.add_entry("Task".to_string(), "Please describe the task you want to perform.\nType `.ok` when finished (multi-line supported).".to_string());
+        f.add_prompt("Please describe the task you want to perform.\nType `.ok` when finished (multi-line supported).".to_string());
         f.update_feed(chat).await?;
     }
     
