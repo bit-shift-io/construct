@@ -12,6 +12,14 @@ use std::sync::Arc;
 use tokio::sync::watch;
 use tokio::sync::Mutex;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub enum TaskPhase {
+    #[default]
+    Planning,
+    Execution,
+    NewProject,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum WizardStep {
     ProjectName,
@@ -47,6 +55,8 @@ pub struct RoomState {
     pub active_task: Option<String>,
     pub active_agent: Option<String>,
     pub active_model: Option<String>,
+    #[serde(default)]
+    pub task_phase: TaskPhase,
     #[serde(default)]
     pub stop_requested: bool,
     #[serde(default)]

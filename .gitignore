@@ -1,6 +1,6 @@
 /target
 /data
-/prompts
 /docs
+/temp
 !README.md
 *.txt

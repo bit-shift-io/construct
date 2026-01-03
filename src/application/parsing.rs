@@ -20,10 +20,45 @@ pub fn parse_actions(response: &str) -> Vec<AgentAction> {
     // or port specific logic if seen in core/utils.rs
     
     // Re-implementing logic akin to core/utils.rs
+    // Regex for WriteFile
+    // ```write path/to/file
+    // content
+    // ```
+    let write_regex = Regex::new(r"(?s)```write\s+([^\n]+)\n(.*?)```").unwrap();
+    
+    // Regex for ReadFile
+    // ```read path/to/file```
+    let read_regex = Regex::new(r"```read\s+([^`]+)```").unwrap();
+
     let shell_regex = Regex::new(r"(?s)```bash\n(.*?)```").unwrap();
-    // Also support sh
     let sh_regex = Regex::new(r"(?s)```sh\n(.*?)```").unwrap();
 
+    for caps in write_regex.captures_iter(response) {
+        if let (Some(path), Some(content)) = (caps.get(1), caps.get(2)) {
+            actions.push(AgentAction::WriteFile(
+                path.as_str().trim().to_string(),
+                content.as_str().to_string() // Do not trim content, preserve whitespace
+            ));
+        }
+    }
+
+    for caps in read_regex.captures_iter(response) {
+        if let Some(path) = caps.get(1) {
+            actions.push(AgentAction::ReadFile(path.as_str().trim().to_string()));
+        }
+    }
+
+    // Regex for ListDir
+    // ```list path/to/dir```
+    let list_regex = Regex::new(r"```list\s+([^`]+)```").unwrap();
+    for caps in list_regex.captures_iter(response) {
+        if let Some(path) = caps.get(1) {
+            actions.push(AgentAction::ListDir(path.as_str().trim().to_string()));
+        }
+    }
+
+    // Only fallback to shell if no specific tool used? 
+    // Or allow mixing? Allowing mixing is fine.
     for caps in shell_regex.captures_iter(response) {
         if let Some(cmd) = caps.get(1) {
             actions.push(AgentAction::ShellCommand(cmd.as_str().trim().to_string()));
@@ -31,12 +66,11 @@ pub fn parse_actions(response: &str) -> Vec<AgentAction> {
     }
     for caps in sh_regex.captures_iter(response) {
         if let Some(cmd) = caps.get(1) {
-             // Avoid duplicates if both match? simplified logic
             actions.push(AgentAction::ShellCommand(cmd.as_str().trim().to_string()));
         }
     }
     
-    if response.contains("TASK_FINISHED") || response.contains("NO_MORE_STEPS") {
+    if response.contains("NO_MORE_STEPS") || response.contains("DONE") { // Support both for safety
          actions.push(AgentAction::Done);
     }
     

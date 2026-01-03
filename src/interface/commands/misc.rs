@@ -42,19 +42,76 @@ pub async fn handle_status(
     Ok(())
 }
 
-pub async fn handle_ask(
+pub async fn handle_ask<C>(
+    config: &AppConfig,
     state: &Arc<Mutex<BotState>>,
     tools: SharedToolExecutor, // For context reading
     llm: &Arc<dyn LlmProvider>,
-    chat: &impl ChatProvider,
+    chat: &C,
     args: &str,
-) -> Result<()> {
+) -> Result<()>
+where C: ChatProvider + Clone + Send + Sync + 'static
+{
     if args.trim().is_empty() {
         chat.send_notification(crate::strings::messages::ASK_USAGE).await.map_err(|e| anyhow::anyhow!(e))?;
         return Ok(());
     }
 
-    // 1. Gather Context
+    // 0. Check for Planning Phase (Refinement Mode)
+    // We only divert to "Refine Plan" if we are consistently in Planning Mode AND have a project.
+    let (is_planning, workdir, feed_manager) = {
+        let guard = state.lock().await;
+        if let Some(r) = guard.rooms.get(&chat.room_id()) {
+            (
+                r.task_phase == crate::application::state::TaskPhase::Planning || r.task_phase == crate::application::state::TaskPhase::NewProject,
+                r.current_working_dir.clone(),
+                r.feed_manager.clone()
+            )
+        } else {
+            (false, None, None)
+        }
+    };
+
+    if is_planning && workdir.is_some() {
+        let wd = workdir.unwrap();
+        // Check if we assume valid project context (e.g. implementation_plan.md exists?)
+        // The user prompted: "Review implementation_plan.md. Type .start to proceed or .ask to refine."
+        // So we strictly follow that.
+        
+        let feed_id = {
+             let guard = state.lock().await;
+             guard.rooms.get(&chat.room_id()).and_then(|r| r.feed_event_id.clone())
+        };
+        let feed = feed_manager.unwrap_or_else(|| Arc::new(Mutex::new(crate::application::feed::FeedManager::new(
+            Some(wd.clone()), 
+            config.system.projects_dir.clone(), 
+            tools.clone(),
+            feed_id
+        ))));
+        
+        // ensure feed in state? (Is usually already there if we got it from state)
+        // If it wasn't there, we made new one.
+        
+        let engine = crate::application::engine::ExecutionEngine::new(
+            config.clone(),
+            llm.clone(), // We need a clone of Arc<dyn LlmProvider>
+            tools.clone(),
+            feed.clone(),
+            state.clone()
+        );
+
+        // We use handle_task to ensure proper spawning and active_agent handling
+        // Pass "Refine the plan based on: <args>" as the task? 
+        // Or just the args?
+        // If we pass just args, the prompt "Analyze the request... Create or update..." should handle it.
+        // It's safer to prepend context maybe? 
+        // "Update the plan: <args>"
+        let task_prompt = format!("Refine the plan: {}", args);
+        
+        return crate::interface::commands::task::handle_task(state, &engine, chat, &task_prompt, None, Some(wd)).await;
+    }
+
+    // 1. Gather Context (Standard Q&A)
     let mut context = String::new();
     let (model, project_path) = {
         let guard = state.lock().await;
@@ -97,6 +154,10 @@ pub async fn handle_ask(
     
     // Use default model if none selected
     let model_id = model.as_deref().unwrap_or("gemini-1.5-pro-latest"); // Default fallback
+    
+    // cast Arc<dyn LlmProvider> ???
+    // The `llm` param is `&Arc<dyn LlmProvider>`.
+    // completion takes `&self`.
     
     let response = llm.completion(&prompt, model_id).await;
 

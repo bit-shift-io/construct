@@ -14,6 +14,7 @@ pub enum WizardAction {
     Continue,
     TransitionToTask {
         prompt: String,
+        display_prompt: Option<String>,
         workdir: String,
     },
 }
@@ -26,7 +27,7 @@ pub async fn handle_step(
     message: &str,
 ) -> Result<WizardAction> {
     let mut create_params: Option<String> = None;
-    let mut handover_context: Option<(String, String)> = None; // (prompt, workdir)
+    let mut handover_context: Option<(String, Option<String>, String)> = None; // (prompt, display_prompt, workdir)
 
     {
         let mut guard = state.lock().await;
@@ -106,7 +107,7 @@ pub async fn handle_step(
                      // Use current working directory
                      let workdir = room_state.current_working_dir.clone().unwrap_or_else(|| ".".to_string());
                      
-                     handover_context = Some((description, workdir));
+                     handover_context = Some((description, None, workdir));
 
                  } else {
                      if !room_state.wizard.buffer.is_empty() {
@@ -169,38 +170,48 @@ pub async fn handle_step(
                  let mut f = feed.lock().await;
                      match &creation_result {
                          Ok(path) => {
+                             let sanitized_path = crate::application::utils::sanitize_path(&path, config.system.projects_dir.as_deref());
                              f.clean_stack();
-                             f.add_checkpoint("Project created".to_string(), path.clone());
+                             f.add_checkpoint("Project created".to_string(), sanitized_path.clone());
                              
                              // Set Context
                          room_state.current_working_dir = Some(path.clone());
                          room_state.current_project_path = Some(path.clone());
+                         room_state.task_phase = crate::application::state::TaskPhase::NewProject;
                          _success_path = Some(path.clone());
                          
                          // Prepare Handover Prompt
                          let description = room_state.wizard.data.get("description").cloned().unwrap_or_default();
-                         let prompt = crate::strings::prompts::new_project_prompt(&name, &description, path);
-                         
-                         handover_context = Some((prompt, path.clone()));
+                         // We still pass FULL path to prompt context mechanics?
+                         // Prompt instructions say: "You are ALREADY inside it ({workdir})"
+                         // User wants: "You are ALREADY inside it (/a3)"?
+                         // Prompts usually benefit from being clear about real paths if agent needs to know them,
+                         // BUT strict sandbox relies on relative paths anyway.
+                         // Displaying simplified path in prompt text is fine as long as CWD is set correctly in backend.
+                                                  let prompt = crate::strings::prompts::new_project_prompt(&name, &description, &sanitized_path);
+                          // "Generating documentation for project 'a4'."
+                          let display_prompt = format!("Generating documentation for project '{}'.", name);
 
-                     }
-                     Err(e) => {
-                         f.update_last_entry(format!("Error: {}", e), false);
-                     }
-                 }
-                 f.update_feed(chat).await?;
-             }
-             
-            room_state.wizard.data.clear();
-            room_state.wizard.buffer.clear();
-        }
-        
-        guard.save();
-    }
+                          handover_context = Some((prompt, Some(display_prompt), path.clone()));
 
-    if let Some((prompt, workdir)) = handover_context {
-        return Ok(WizardAction::TransitionToTask { prompt, workdir });
-    }
+                      }
+                      Err(e) => {
+                          f.update_last_entry(format!("Error: {}", e), false);
+                      }
+                  }
+                  f.update_feed(chat).await?;
+              }
+              
+             room_state.wizard.data.clear();
+             room_state.wizard.buffer.clear();
+         }
+         
+         guard.save();
+     }
+
+     if let Some((prompt, display_prompt, workdir)) = handover_context {
+         return Ok(WizardAction::TransitionToTask{ prompt, display_prompt, workdir });
+     }
 
     Ok(WizardAction::Continue)
 }

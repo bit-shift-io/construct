@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum AgentAction {
     ShellCommand(String),
-    // FileOp(String), // Future
+    WriteFile(String, String), // path, content
+    ReadFile(String), // path
+    ListDir(String), // path
     Done,
 }

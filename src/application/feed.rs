@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 pub enum FeedMode {
     Active,
     Squashed,
+    PlanReview,
     Final,
     Wizard,
 }
@@ -85,7 +86,16 @@ impl FeedEntry {
                 } else {
                     output.clone()
                 };
-                result.push_str(&format!("\n```\n{}\n```", truncated));
+                // User requested less backticks. Just show as quote or plain? 
+                // Using indented block or quote is cleaner than code block for logs sometimes.
+                // But code block preserves formatting.
+                // User said "Excessive backticks". Maybe standard message has too many?
+                // Or "Latest Details" has too many.
+                // "Latest Details" calls format_active().
+                // format_active wraps output in ```.
+                // Let's change to blockquote `> ` or just text if it's short.
+                // Or just remove the surrounding ```.
+                result.push_str(&format!("\n> {}\n", truncated.replace('\n', "\n> ")));
             }
         }
         
@@ -111,19 +121,30 @@ pub struct FeedManager {
     recent_activities: Vec<String>,
     projects_root: Option<String>,
     _tools: SharedToolExecutor,
+    
+    // New fields for Plan Review
+    plan_content: Option<String>,
+    roadmap_content: Option<String>,
 }
 
 impl FeedManager {
-    pub fn new(project_path: Option<String>, projects_root: Option<String>, tools: SharedToolExecutor) -> Self {
+    pub fn new(
+        project_path: Option<String>, 
+        projects_root: Option<String>, 
+        tools: SharedToolExecutor, 
+        feed_event_id: Option<String>
+    ) -> Self {
         Self {
             entries: Vec::new(),
             mode: FeedMode::Active,
             _project_path: project_path,
             current_task: None,
-            feed_event_id: None,
+            feed_event_id,
             recent_activities: Vec::new(),
             projects_root,
             _tools: tools,
+            plan_content: None,
+            roadmap_content: None,
         }
     }
 
@@ -155,8 +176,32 @@ impl FeedManager {
         }
         self.entries.push(FeedEntry::new(FeedEntryKind::Activity, "System".to_string(), content));
     }
-    
-    // Legacy support or generic add?
+
+    pub fn replace_last_activity(&mut self, new_content: String, success: bool) {
+        // Update recent log
+        if let Some(last) = self.recent_activities.last_mut() {
+            let icon = if success { "✅" } else { "❌" };
+            *last = format!("{} {}", icon, new_content);
+        }
+        // Update entry
+        if let Some(entry) = self.entries.last_mut() {
+            if entry.kind == FeedEntryKind::Activity {
+                 entry.content = new_content; // Update text
+                 // We rely on format_active to add icon? 
+                 // format_active uses 🔄 for Activity.
+                 // We might need to change Kind to Checkpoint for "Done" items?
+                 // Checkpoint uses ✅.
+                 if success {
+                     entry.kind = FeedEntryKind::Checkpoint;
+                     entry.label = "Completed".to_string(); // or System?
+                 } else {
+                     // Keep Activity but maybe mark failed?
+                     entry.label = "Failed".to_string();
+                 }
+                 entry.output = None; // Clear any output text
+            }
+        }
+    }
     // Prefer strict methods now.
 
     pub fn update_last_entry(&mut self, output: String, _success: bool) {
@@ -191,27 +236,70 @@ impl FeedManager {
         match self.mode {
             FeedMode::Active => self.format_active(),
             FeedMode::Squashed => self.format_squashed(),
+            FeedMode::PlanReview => self.format_plan_review(),
             FeedMode::Final => self.format_final(),
             FeedMode::Wizard => self.format_wizard(),
         }
     }
+    
+    pub fn set_plan_review_mode(&mut self, roadmap: String, plan: String) {
+        self.mode = FeedMode::PlanReview;
+        self.roadmap_content = Some(roadmap);
+        self.plan_content = Some(plan);
+    }
+    
+    fn format_plan_review(&self) -> String {
+        // "REPLACE IS DESIRED"
+        // "Last line should say..."
+        let mut content = String::new();
+        // Maybe header?
+        content.push_str("**📋 Plan Generated**\n\n");
+        
+        if let Some(r) = &self.roadmap_content {
+            content.push_str("### Roadmap\n");
+            // Truncate if massive? Or show full?
+            // User implies full display "show roadmap.md and plan.md"
+            content.push_str(r);
+            content.push_str("\n\n");
+        }
+        
+        if let Some(p) = &self.plan_content {
+            if self.roadmap_content.is_some() {
+                content.push_str("---\n\n");
+            }
+            content.push_str("### Implementation Plan\n");
+            content.push_str(p);
+            content.push_str("\n\n");
+        }
+        
+        content.push_str("✅ **Plan Generated**: Type `.start` to proceed or `.ask` to refine.");
+        content
+    }
 
     fn format_active(&self) -> String {
-        let mut content = String::from("**🔄 Active Task**\n\n");
+        let mut content = String::from("**🔄 Thinking & Planning...**\n\n");
         if let Some(task) = &self.current_task {
-            content.push_str(&format!("**Task**: {}\n\n", task));
+            // Only show first line
+            let summary = task.lines().next().unwrap_or(task);
+            let truncated = if summary.len() > 100 {
+                format!("{}...", &summary[..100])
+            } else {
+                summary.to_string()
+            };
+            content.push_str(&format!("**Task**: {}\n\n", truncated));
         }
-        content.push_str("**Recent Activity** (last 15):\n");
+        content.push_str("**Progress**:\n");
         for activity in &self.recent_activities {
             content.push_str(&format!("{}\n", activity));
         }
-        if !self.entries.is_empty() {
-            content.push_str("\n**Latest Details**:\n");
-            // Show all active stack items? Or just last 5?
-            // With Clean Stack, entries should be relevant.
-            let start = self.entries.len().saturating_sub(5);
-            for entry in &self.entries[start..] {
-                 content.push_str(&entry.format_active());
+        
+        // Only show detailed output if there's an error (or strictly requested)
+        // We assume 'output' is populated mostly on errors or meaningful results now.
+        if let Some(last) = self.entries.last() {
+            if let Some(out) = &last.output {
+                if !out.is_empty() {
+                    content.push_str(&format!("\n> {}\n", out.replace('\n', "\n> ")));
+                }
             }
         }
         content
@@ -254,6 +342,15 @@ impl FeedManager {
             AgentAction::Done => {
                 self.squash();
                 self.add_activity("Task Complete".to_string());
+            }
+            AgentAction::WriteFile(path, _) => {
+                self.add_activity(format!("Writing: `{}`", path));
+            }
+            AgentAction::ReadFile(path) => {
+                self.add_activity(format!("Reading: `{}`", path));
+            }
+            AgentAction::ListDir(path) => {
+                self.add_activity(format!("Listing: `{}`", path));
             }
         }
     }

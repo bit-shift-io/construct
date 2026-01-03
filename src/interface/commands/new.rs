@@ -27,7 +27,12 @@ pub async fn handle_new(
     // If no args (or empty string), Start Wizard
     if args.trim().is_empty() {
         // Initialize Feed
-    let feed = Arc::new(Mutex::new(FeedManager::new(None, config.system.projects_dir.clone(), tools.clone())));
+    let feed = Arc::new(Mutex::new(FeedManager::new(
+        None, 
+        config.system.projects_dir.clone(), 
+        tools.clone(),
+        None
+    )));
     {
             let mut guard = state.lock().await;
             let room_state = guard.get_room_state(&chat.room_id());

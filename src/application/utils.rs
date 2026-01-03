@@ -26,15 +26,19 @@ pub fn sanitize_path(path: &str, projects_dir: Option<&str>) -> String {
 /// Returns `true` if safe (no suspicious args), `false` if unsafe.
 pub fn check_command_safety(command: &str, projects_root: Option<&str>) -> bool {
     // Simple tokenizer: split by space.
-    // Ideally we should handle quotes, but simple split caches most shell usage.
     let tokens: Vec<&str> = command.split_whitespace().collect();
     
     for token in tokens {
         // Strip potential quoting
         let clean_token = token.trim_matches(|c| c == '\'' || c == '"');
         
+        // 1. Check for Path Traversal
+        if clean_token.contains("..") {
+            return false; // suspicious relative path
+        }
+
+        // 2. Check Absolute Paths
         if clean_token.starts_with('/') {
-            // It's an absolute path.
             if let Some(root) = projects_root {
                  let normalized_root = if root.ends_with('/') { &root[..root.len()-1] } else { root };
                  // Must start with root to be safe
@@ -42,13 +46,17 @@ pub fn check_command_safety(command: &str, projects_root: Option<&str>) -> bool 
                      return false; // Accessing /etc, /var, etc.
                  }
             } else {
-                // No root defined? Then absolute paths are technically "outside sandbox" logic if we enforce strictness.
-                // But sandbox logic usually implies "restrict to X". If X is None, maybe Allow All?
-                // The user said "sandbox to projects_dir".
-                // If projects_dir is None (not configured), we probably shouldn't block everything?
-                // Assuming defaults safe.
-                return false; // Fail safe: if we are checking safety, absolute path with no config is suspicious?
+                // If no root configured, block all absolute paths for safety
+                return false; 
             }
+        }
+        
+        // 3. Optional: Block dangerous shell operators if needed (like > /etc/passwd)
+        // Check if token contains > and an absolute path immediately after?
+        // Basic split checks individual tokens. `>file` might be one token if no space.
+        if clean_token.contains(">/") {
+             // quick check for redirection to absolute path without space
+             return false;
         }
     }
     true

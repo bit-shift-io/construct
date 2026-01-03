@@ -28,7 +28,18 @@ pub async fn start_task_wizard(
         room_state.current_working_dir.clone().unwrap_or_else(|| ".".to_string())
     };
 
-    let feed = Arc::new(Mutex::new(FeedManager::new(Some(workdir), config.system.projects_dir.clone(), tools.clone())));
+    let feed_id = {
+        let mut guard = state.lock().await;
+        let room_state = guard.get_room_state(&chat.room_id());
+        room_state.feed_event_id.clone()
+    };
+    
+    let feed = Arc::new(Mutex::new(FeedManager::new(
+        Some(workdir), 
+        config.system.projects_dir.clone(), 
+        tools.clone(),
+        feed_id
+    )));
     
     {
         let mut guard = state.lock().await;
@@ -60,6 +71,7 @@ pub async fn handle_task<C>(
     engine: &ExecutionEngine,
     chat: &C,
     task: &str,
+    display_task: Option<&str>,
     workdir: Option<String>,
 ) -> Result<()>
 where C: ChatProvider + Clone + Send + Sync + 'static
@@ -84,6 +96,10 @@ where C: ChatProvider + Clone + Send + Sync + 'static
              // Ideally we should have a config default. "default" is the safe hardcoded bet if we assume one exists.
              room.active_agent = Some("default".to_string());
         }
+        
+        // Reset Phase to Planning
+        room.task_phase = crate::application::state::TaskPhase::Planning;
+        
         room.active_agent.clone().unwrap()
     };
 
@@ -91,11 +107,12 @@ where C: ChatProvider + Clone + Send + Sync + 'static
     let engine_clone = engine.clone();
     let chat_clone = chat.clone();
     let task_owned = task.to_string();
+    let display_task_owned = display_task.map(|s| s.to_string());
     let workdir_owned = workdir.clone();
     let agent_name_owned = agent_name.clone();
 
     let handle = tokio::spawn(async move {
-        match engine_clone.run_task(&chat_clone, &task_owned, &agent_name_owned, workdir_owned).await {
+        match engine_clone.run_task(&chat_clone, &task_owned, display_task_owned.as_deref(), &agent_name_owned, workdir_owned).await {
             Ok(completed) => {
                 if completed {
                     let _ = chat_clone.send_notification(crate::strings::messages::TASK_COMPLETE).await;
