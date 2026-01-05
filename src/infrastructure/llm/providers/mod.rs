@@ -26,6 +26,8 @@ pub struct ProviderConfig {
     pub base_url: Option<String>,
     /// Default model
     pub default_model: String,
+    /// Timeout in seconds
+    pub timeout: Option<u64>,
 }
 
 impl ProviderConfig {
@@ -50,6 +52,7 @@ impl ProviderConfig {
             api_key,
             base_url: config.endpoint.clone(),
             default_model: config.model.clone(),
+            timeout: config.timeout,
         })
     }
 

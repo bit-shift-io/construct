@@ -83,16 +83,33 @@ impl ExecutionEngine {
             };
 
             // 1. Build Context
-            // TODO: Extract to ContextEngine
-            let (tasks_content, roadmap_content, plan_content) = if let Some(wd) = &working_dir {
-                // Use MCP to read files strictly
+            // Resolve Active Task directory relative to CWD
+            let active_task_rel_path = {
+                 let mut guard = self.state.lock().await;
+                 let room = guard.get_room_state(&chat.room_id());
+                 room.active_task.clone()
+            };
+            
+            let (tasks_content, roadmap_content, architecture_content, plan_content) = if let Some(wd) = &working_dir {
                 let client = self.tools.lock().await;
-                let tasks = client.read_file(&format!("{}/tasks.md", wd)).await.unwrap_or_else(|_| "(No tasks.md)".into());
-                let roadmap = client.read_file(&format!("{}/roadmap.md", wd)).await.unwrap_or_else(|_| "(No roadmap.md)".into());
-                let plan = client.read_file(&format!("{}/implementation_plan.md", wd)).await.unwrap_or_else(|_| "(No implementation_plan.md)".into());
-                (tasks, roadmap, plan)
+                // Specs
+                let roadmap = client.read_file(&format!("{}/specs/roadmap.md", wd)).await.unwrap_or_else(|_| "(No roadmap.md)".into());
+                let architecture = client.read_file(&format!("{}/specs/architecture.md", wd)).await.unwrap_or_else(|_| "(No architecture.md)".into());
+                
+                // Active Task Context
+                let (request, plan) = if let Some(task_rel) = &active_task_rel_path {
+                     let request_path = format!("{}/{}/request.md", wd, task_rel);
+                     let plan_path = format!("{}/{}/plan.md", wd, task_rel);
+                     let r = client.read_file(&request_path).await.unwrap_or_else(|_| "(No request.md)".into());
+                     let p = client.read_file(&plan_path).await.unwrap_or_else(|_| "(No plan.md)".into());
+                     (r, p)
+                } else {
+                     ("(No active task context)".into(), "(No active task plan)".into())
+                };
+
+                (request, roadmap, architecture, plan)
             } else {
-                ("(No context)".into(), "(No context)".into(), "(No context)".into())
+                ("(No context)".into(), "(No context)".into(), "(No context)".into(), "(No context)".into())
             };
 
             let projects_root = {
@@ -106,18 +123,24 @@ impl ExecutionEngine {
                 ".".to_string()
             };
             
+            // NOTE: 'tasks_content' variable now holds the REQUEST content.
+            // 'plan_content' holds the PLAN content.
+            // 'roadmap_content' holds the SPEC/ROADMAP content.
+            
             let prompt = match task_phase {
                 crate::application::state::TaskPhase::Planning => {
-                    crate::strings::prompts::planning_mode_turn(&cwd_msg, &roadmap_content, &tasks_content)
+                    // planning_mode_turn(cwd, roadmap, request, plan, architecture, active_task)
+                    let task_path = active_task_rel_path.as_deref().unwrap_or("tasks/CURRENT");
+                    crate::strings::prompts::planning_mode_turn(&cwd_msg, &roadmap_content, &tasks_content, &plan_content, &architecture_content, task_path)
                 },
                 crate::application::state::TaskPhase::Execution => {
-                    crate::strings::prompts::execution_mode_turn(&cwd_msg, &roadmap_content, &tasks_content, &plan_content)
+                    let task_path = active_task_rel_path.as_deref().unwrap_or("tasks/CURRENT");
+                    crate::strings::prompts::execution_mode_turn(&cwd_msg, &roadmap_content, &tasks_content, &plan_content, &architecture_content, task_path)
                 },
                 crate::application::state::TaskPhase::NewProject => {
-                    // Start of New Project: The 'task' variable already holds the full Architect Persona + Specific Instructions.
-                    // We only need to provide the dynamic/updated Roadmap & Tasks to ensure the agent sees the files it just wrote.
-                    // We DO NOT repeat the full Architect Template.
-                    format!("\n# Current Project Status\n## Roadmap\n{}\n\n## Tasks\n{}", roadmap_content, tasks_content)
+                    // For New Project phase, we still display the just-created files.
+                    format!("\n# Current Project Status\n## Roadmap\n{}\n\n## Request\n{}\n\n## Plan\n{}", 
+                        roadmap_content, tasks_content, plan_content)
                 }
             };
             
@@ -168,14 +191,25 @@ impl ExecutionEngine {
                             crate::application::state::TaskPhase::Planning | crate::application::state::TaskPhase::NewProject => {
                                 // Transition to Plan Review Mode
                                 // We need to re-read the files to get the LATEST content generated by the agent.
-                                // The initial reading at top of loop was before agent action.
-                                let (roadmap, plan) = if let Some(wd) = &working_dir {
+                                let active_task_rel_path = {
+                                     let mut guard = self.state.lock().await;
+                                     guard.get_room_state(&chat.room_id()).active_task.clone()
+                                };
+                                
+                                let (roadmap, architecture, plan) = if let Some(wd) = &working_dir {
                                     let client = self.tools.lock().await;
-                                    let r = client.read_file(&format!("{}/roadmap.md", wd)).await.unwrap_or_else(|_| "(No roadmap.md)".into());
-                                    let p = client.read_file(&format!("{}/implementation_plan.md", wd)).await.unwrap_or_else(|_| "(No implementation_plan.md)".into());
-                                    (r, p)
+                                    let r = client.read_file(&format!("{}/specs/roadmap.md", wd)).await.unwrap_or_else(|_| "(No roadmap.md)".into());
+                                    let a = client.read_file(&format!("{}/specs/architecture.md", wd)).await.unwrap_or_else(|_| "(No architecture.md)".into());
+                                    
+                                    let p = if let Some(task_rel) = &active_task_rel_path {
+                                         let plan_path = format!("{}/{}/plan.md", wd, task_rel);
+                                         client.read_file(&plan_path).await.unwrap_or_else(|_| "(No plan.md)".into())
+                                    } else {
+                                         "(No active task plan)".into()
+                                    };
+                                    (r, a, p)
                                 } else {
-                                    ("(No roadmap)".into(), "(No plan)".into())
+                                    ("(No roadmap)".into(), "(No architecture)".into(), "(No plan)".into())
                                 };
 
                                 {
@@ -188,6 +222,9 @@ impl ExecutionEngine {
                                      feed.add_activity("Planning Complete".to_string());
                                      let _ = feed.update_feed(chat).await;
                                 }
+
+                                // Send Architecture
+                                let _ = chat.send_message(&architecture).await;
 
                                 // Send Roadmap
                                 let _ = chat.send_message(&roadmap).await;

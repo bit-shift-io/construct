@@ -242,11 +242,7 @@ impl FeedManager {
         }
     }
     
-    pub fn set_plan_review_mode(&mut self, roadmap: String, plan: String) {
-        self.mode = FeedMode::PlanReview;
-        self.roadmap_content = Some(roadmap);
-        self.plan_content = Some(plan);
-    }
+
     
     fn format_plan_review(&self) -> String {
         // "REPLACE IS DESIRED"

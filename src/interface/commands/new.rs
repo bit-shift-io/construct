@@ -73,6 +73,24 @@ pub async fn handle_new(
                 let room_state = guard.get_room_state(&chat.room_id());
                 room_state.current_working_dir = Some(path.clone());
                 room_state.current_project_path = Some(path.clone());
+                // Create task subfolder: tasks/001-init
+                let task_dir = std::path::Path::new(&path).join("tasks").join("001-init");
+                let _ = std::fs::create_dir_all(&task_dir);
+
+                // Write request.md (from template + user input)
+                if !_requirements.is_empty() {
+                    let req_content = crate::strings::templates::REQUEST_TEMPLATE.replace("{{OBJECTIVE}}", _requirements);
+                    let _ = std::fs::write(task_dir.join("request.md"), req_content);
+                } else {
+                     let req_content = crate::strings::templates::REQUEST_TEMPLATE.replace("{{OBJECTIVE}}", "(No initial requirements provided)");
+                     let _ = std::fs::write(task_dir.join("request.md"), req_content);
+                }
+
+                // Write plan.md (from template)
+                let _ = std::fs::write(task_dir.join("plan.md"), crate::strings::templates::PLAN_TEMPLATE);
+                
+                // Set active task
+                room_state.active_task = Some("tasks/001-init".to_string());
             } // Borrow ends
             guard.save();
             

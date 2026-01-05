@@ -74,7 +74,7 @@ where C: ChatProvider + Clone + Send + Sync + 'static
 
     if is_planning && workdir.is_some() {
         let wd = workdir.unwrap();
-        // Check if we assume valid project context (e.g. implementation_plan.md exists?)
+        // Check if we assume valid project context (e.g. plan.md exists?)
         // The user prompted: "Review implementation_plan.md. Type .start to proceed or .ask to refine."
         // So we strictly follow that.
         
@@ -108,7 +108,7 @@ where C: ChatProvider + Clone + Send + Sync + 'static
         // "Update the plan: <args>"
         let task_prompt = format!("Refine the plan: {}", args);
         
-        return crate::interface::commands::task::handle_task(state, &engine, chat, &task_prompt, None, Some(wd)).await;
+        return crate::interface::commands::task::handle_task(state, &engine, chat, &task_prompt, None, Some(wd), false).await;
     }
 
     // 1. Gather Context (Standard Q&A)
@@ -176,6 +176,7 @@ where C: ChatProvider + Clone + Send + Sync + 'static
 }
 
 pub async fn handle_read(
+    state: &Arc<Mutex<BotState>>, // Re-add state param
     tools: SharedToolExecutor,
     chat: &impl ChatProvider,
     args: &str,
@@ -186,10 +187,26 @@ pub async fn handle_read(
         return Ok(());
     }
 
+    let cwd = {
+         let guard = state.lock().await;
+         let room_state = guard.rooms.get(&chat.room_id());
+         room_state.and_then(|r| r.current_working_dir.clone())
+    };
+
+    let resolved_path = if let Some(wd) = cwd {
+        if std::path::Path::new(path).is_absolute() {
+            path.to_string()
+        } else {
+             format!("{}/{}", wd, path)
+        }
+    } else {
+        path.to_string()
+    };
+
     let client = tools.lock().await;
-    match client.read_file(path).await {
+    match client.read_file(&resolved_path).await {
         Ok(content) => {
-            chat.send_message(&crate::strings::messages::file_read_success(path, &content)).await.map_err(|e| anyhow::anyhow!(e))?;
+            chat.send_message(&crate::strings::messages::file_read_success(&resolved_path, &content)).await.map_err(|e| anyhow::anyhow!(e))?;
         }
         Err(e) => {
             chat.send_notification(&crate::strings::messages::file_read_failed(&e.to_string())).await.map_err(|e| anyhow::anyhow!(e))?;

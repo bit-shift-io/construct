@@ -73,6 +73,7 @@ pub async fn handle_task<C>(
     task: &str,
     display_task: Option<&str>,
     workdir: Option<String>,
+    create_new_folder: bool,
 ) -> Result<()>
 where C: ChatProvider + Clone + Send + Sync + 'static
 {
@@ -90,16 +91,58 @@ where C: ChatProvider + Clone + Send + Sync + 'static
         // IMPORTANT: Clear any pending stop request from previous sessions
         room.stop_requested = false;
 
-        // Ensure active agent is set (e.g. from wizard or sticky)
+        // Ensure active agent is set
         if room.active_agent.is_none() {
-             // Fallback to "default" or first available? 
-             // Ideally we should have a config default. "default" is the safe hardcoded bet if we assume one exists.
              room.active_agent = Some("default".to_string());
         }
         
         // Reset Phase to Planning
         room.task_phase = crate::application::state::TaskPhase::Planning;
         
+        if create_new_folder {
+             // Create Task Subfolder Logic
+             // Find next ID
+             let wd = workdir.as_ref().unwrap();
+             let tasks_dir = std::path::Path::new(wd).join("tasks");
+             // Ensure tasks dir exists (in case it wasn't made yet)
+             let _ = std::fs::create_dir_all(&tasks_dir);
+             
+             let mut max_id = 0;
+             if let Ok(entries) = std::fs::read_dir(&tasks_dir) {
+                 for entry in entries.flatten() {
+                     if let Some(file_name) = entry.file_name().to_str() {
+                         if let Some(id_str) = file_name.split('-').next() {
+                              if let Ok(id) = id_str.parse::<u32>() {
+                                  if id > max_id { max_id = id; }
+                              }
+                         }
+                     }
+                 }
+             }
+             let next_id = max_id + 1;
+             // Sanitize Task Description for Folder Name
+             // Use only alphanumeric and dashes, max 30 chars
+             let safe_desc: String = task.chars()
+                 .filter(|c| c.is_alphanumeric() || *c == ' ')
+                 .map(|c| if c == ' ' { '-' } else { c.to_ascii_lowercase() })
+                 .collect();
+             let safe_desc = if safe_desc.len() > 30 { &safe_desc[..30] } else { &safe_desc };
+             
+             let task_folder_name = format!("{:03}-{}", next_id, safe_desc.trim_matches('-'));
+             let task_path = tasks_dir.join(&task_folder_name);
+             
+             let _ = std::fs::create_dir_all(&task_path);
+             
+             // Write Templates
+             let req_content = crate::strings::templates::REQUEST_TEMPLATE.replace("{{OBJECTIVE}}", task);
+             let _ = std::fs::write(task_path.join("request.md"), req_content);
+             // Note: plan.md context is handled via agent instructions now.
+             
+             // Set Active Task Folder
+             let rel_task_path = format!("tasks/{}", task_folder_name);
+             room.active_task = Some(rel_task_path);
+        }
+
         room.active_agent.clone().unwrap()
     };
 

@@ -119,6 +119,8 @@ pub struct AgentConfig {
     pub fallback_agent: Option<String>, // Agent to switch to if all models fail
     #[serde(default)]
     pub requests_per_minute: Option<u64>,
+    #[serde(default)]
+    pub timeout: Option<u64>, // Timeout in seconds
     /// Additional provider-specific parameters (e.g., caching, debug, temperature)
     #[serde(default)]
     pub extra_params: std::collections::HashMap<String, serde_json::Value>,
@@ -137,6 +139,7 @@ impl Default for AgentConfig {
             model_fallbacks: None,
             fallback_agent: None,
             requests_per_minute: None,
+            timeout: None,
             extra_params: std::collections::HashMap::new(),
         }
     }

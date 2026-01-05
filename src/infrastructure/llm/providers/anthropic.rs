@@ -168,12 +168,18 @@ pub async fn chat(config: ProviderConfig, context: Context) -> Result<Response, 
     };
 
     // Make HTTP request
-    let response = http_client()
+    let mut request_builder = http_client()
         .post(&url)
         .header("x-api-key", config.api_key)
         .header("anthropic-version", api_version)
         .header("Content-Type", "application/json")
-        .json(&request)
+        .json(&request);
+
+    if let Some(timeout_secs) = config.timeout {
+        request_builder = request_builder.timeout(std::time::Duration::from_secs(timeout_secs));
+    }
+
+    let response = request_builder
         .send()
         .await
         .map_err(|e| Error::new("anthropic", format!("HTTP request failed: {}", e)))?;

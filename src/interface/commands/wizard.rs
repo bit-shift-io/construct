@@ -16,6 +16,7 @@ pub enum WizardAction {
         prompt: String,
         display_prompt: Option<String>,
         workdir: String,
+        create_new_folder: bool,
     },
 }
 
@@ -27,7 +28,7 @@ pub async fn handle_step(
     message: &str,
 ) -> Result<WizardAction> {
     let mut create_params: Option<String> = None;
-    let mut handover_context: Option<(String, Option<String>, String)> = None; // (prompt, display_prompt, workdir)
+    let mut handover_context: Option<(String, Option<String>, String, bool)> = None; // (prompt, display_prompt, workdir, create_new_folder)
 
     {
         let mut guard = state.lock().await;
@@ -107,7 +108,7 @@ pub async fn handle_step(
                      // Use current working directory
                      let workdir = room_state.current_working_dir.clone().unwrap_or_else(|| ".".to_string());
                      
-                     handover_context = Some((description, None, workdir));
+                     handover_context = Some((description, None, workdir, true));
 
                  } else {
                      if !room_state.wizard.buffer.is_empty() {
@@ -178,6 +179,26 @@ pub async fn handle_step(
                          room_state.current_working_dir = Some(path.clone());
                          room_state.current_project_path = Some(path.clone());
                          room_state.task_phase = crate::application::state::TaskPhase::NewProject;
+                         let description_str = room_state.wizard.data.get("description").cloned().unwrap_or_default();
+                         
+                         // Create task subfolder: tasks/001-init
+                         let task_dir = std::path::Path::new(&path).join("tasks").join("001-init");
+                         let _ = std::fs::create_dir_all(&task_dir);
+                         
+                         // Write request.md
+                         if !description_str.is_empty() {
+                              let req_content = crate::strings::templates::REQUEST_TEMPLATE.replace("{{OBJECTIVE}}", &description_str);
+                              let _ = std::fs::write(task_dir.join("request.md"), req_content);
+                         } else {
+                              let req_content = crate::strings::templates::REQUEST_TEMPLATE.replace("{{OBJECTIVE}}", "(No description provided)");
+                              let _ = std::fs::write(task_dir.join("request.md"), req_content);
+                         }
+                         
+                         // Note: plan.md creation is delegated to Agent via new_project_prompt.
+                         
+                         // Set active task
+                         room_state.active_task = Some("tasks/001-init".to_string());
+                         
                          _success_path = Some(path.clone());
                          
                          // Prepare Handover Prompt
@@ -192,7 +213,7 @@ pub async fn handle_step(
                           // "Generating documentation for project 'a4'."
                           let display_prompt = format!("Generating documentation for project '{}'.", name);
 
-                          handover_context = Some((prompt, Some(display_prompt), path.clone()));
+                          handover_context = Some((prompt, Some(display_prompt), path.clone(), false));
 
                       }
                       Err(e) => {
@@ -209,8 +230,8 @@ pub async fn handle_step(
          guard.save();
      }
 
-     if let Some((prompt, display_prompt, workdir)) = handover_context {
-         return Ok(WizardAction::TransitionToTask{ prompt, display_prompt, workdir });
+     if let Some((prompt, display_prompt, workdir, create_new_folder)) = handover_context {
+         return Ok(WizardAction::TransitionToTask{ prompt, display_prompt, workdir, create_new_folder });
      }
 
     Ok(WizardAction::Continue)

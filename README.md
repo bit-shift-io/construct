@@ -17,6 +17,20 @@ The project follows a clean, hexagonal/layered architecture:
     - `MCP`: Safe tool execution layer (Shell, Filesystem).
 - **Interface**: Specific command handlers (`.task`, `.new`, `.status`, etc.).
 
+## 📂 Project Structure
+
+Bot-managed projects follow a strict two-folder architecture to separate long-term documentation from ephemeral task context.
+
+### 1. `specs/` (The "Truth")
+Contains global, enduring project documentation.
+- `roadmap.md`: High-level milestones and feature tracking.
+- `architecture.md`: The current system design, component diagrams, and data flow. This reflects the *current state* of the main branch.
+
+### 2. `tasks/` (The "Change")
+Contains ephemeral, task-specific context. Each task gets a unique sequential folder (e.g., `tasks/003-refactor-login`).
+- `request.md`: The "Ticket". The original user request that triggered this task.
+- `plan.md`: The execution plan for *this specific task*. It describes *how* to modify the system (and `rules`/`specs`) to achieve the goal.
+
 ## 🚀 Features
 
 - **Autonomous Coding**: Give it a task (`.task "Refactor login"`) and it will plan, edit, and verify changes.

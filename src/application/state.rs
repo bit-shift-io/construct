@@ -57,6 +57,7 @@ pub struct RoomState {
     pub active_model: Option<String>,
     #[serde(default)]
     pub task_phase: TaskPhase,
+    pub project_requirements: Option<String>,
     #[serde(default)]
     pub stop_requested: bool,
     #[serde(default)]

@@ -20,27 +20,18 @@ impl ProjectManager {
 
     /// Create a new project directory and initial files
     pub async fn create_project(&self, name: &str, parent_dir: &str) -> Result<String> {
-        let client = self.tools.lock().await;       
         let project_path = Path::new(parent_dir).join(name);
         let path_str = project_path.to_string_lossy().to_string();
 
-        // roadmap.md
-        client.write_file(
-            &format!("{}/roadmap.md", path_str),
-            "# Roadmap\n\n- [ ] Initial Setup\n"
-        ).await?;
+        // Create project directory
+        std::fs::create_dir_all(&project_path)
+            .map_err(|e| anyhow::anyhow!("Failed to create project dir: {}", e))?;
+        
+        // Create specs directory
+        std::fs::create_dir_all(project_path.join("specs"))
+            .map_err(|e| anyhow::anyhow!("Failed to create specs dir: {}", e))?;
 
-        // tasks.md
-        client.write_file(
-            &format!("{}/tasks.md", path_str),
-            "# Tasks\n\n- [ ] Initialize project structure\n"
-        ).await?;
-
-        // state.md (Empty initially)
-        client.write_file(
-            &format!("{}/state.md", path_str),
-            "# Project State\n"
-        ).await?;
+        // We leave the file creation to the Agent in the New Project phase.
 
         Ok(path_str)
     }
@@ -49,6 +40,6 @@ impl ProjectManager {
     pub async fn is_valid_project(&self, path: &str) -> bool {
         let client = self.tools.lock().await;
         // Check for roadmap.md existence using read_file as a proxy.
-        client.read_file(&format!("{}/roadmap.md", path)).await.is_ok()
+        client.read_file(&format!("{}/specs/roadmap.md", path)).await.is_ok()
     }
 }

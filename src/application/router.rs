@@ -79,7 +79,7 @@ impl CommandRouter {
                 msg
             ).await?;
 
-            if let commands::wizard::WizardAction::TransitionToTask { prompt, display_prompt, workdir } = result {
+            if let commands::wizard::WizardAction::TransitionToTask { prompt, display_prompt, workdir, create_new_folder } = result {
                  // Transition to Task!
                  // Reuse feed from RoomState
                  let feed = {
@@ -109,7 +109,7 @@ impl CommandRouter {
                      self.state.clone(),
                  );
                  
-                 commands::task::handle_task(&self.state, &engine, chat, &prompt, display_prompt.as_deref(), Some(workdir)).await?;
+                 commands::task::handle_task(&self.state, &engine, chat, &prompt, display_prompt.as_deref(), Some(workdir), create_new_folder).await?;
             }
             return Ok(());
         }
@@ -190,7 +190,7 @@ impl CommandRouter {
                          
                          let _ = chat.send_message("🚀 **Executing Plan**...").await;
                          // Execute Plan
-                         commands::task::handle_task(&self.state, &engine, chat, "Execute the implementation details described in `plan.md`. Implement the code.", None, Some(wd)).await?;
+                         commands::task::handle_task(&self.state, &engine, chat, "Execute the implementation details described in `plan.md`. Implement the code.", None, Some(wd), false).await?;
                      } else {
                          let _ = chat.send_message("No active project or plan found to continue.").await;
                      }
@@ -249,7 +249,7 @@ impl CommandRouter {
                         self.state.clone(), 
                     );
                     
-                    commands::task::handle_task(&self.state, &engine, chat, args, None, Some(workdir)).await?;
+                    commands::task::handle_task(&self.state, &engine, chat, args, None, Some(workdir), true).await?;
                 }
             }
             ".run" | ".exec" => {
@@ -278,7 +278,7 @@ impl CommandRouter {
                 commands::misc::handle_ask(&self.config, &self.state, self.tools.clone(), &self.llm, chat, args).await?;
             }
             ".read" => {
-                commands::misc::handle_read(self.tools.clone(), chat, args).await?;
+                commands::misc::handle_read(&self.state, self.tools.clone(), chat, args).await?;
             }
             ".start" => {
                 // Resolve ExecutionEngine dependencies
