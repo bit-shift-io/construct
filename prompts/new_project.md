@@ -30,8 +30,4 @@ REQUIRED ACTIONS (Execute in order):
 {{TEMPLATE_WALKTHROUGH}}
 ```
 
-5. YOU MUST CREATE ALL 4 FILES.
-5. STOP IMMEDIATELY after creating/populating these files.
-   - Verify files are updated before stopping.
-5. DO NOT write to the root directory.
-6. Output 'NO_MORE_STEPS' to finish this turn.
+5. Output 'NO_MORE_STEPS' immediately after writing all 4 files.

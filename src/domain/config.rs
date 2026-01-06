@@ -157,3 +157,4 @@ pub struct MatrixConfig {
     #[serde(default)]
     pub display_name: Option<String>,
 }
+

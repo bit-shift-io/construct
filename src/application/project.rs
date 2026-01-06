@@ -31,6 +31,10 @@ impl ProjectManager {
         std::fs::create_dir_all(project_path.join("specs"))
             .map_err(|e| anyhow::anyhow!("Failed to create specs dir: {}", e))?;
 
+        // Create tasks directory
+        std::fs::create_dir_all(project_path.join("tasks"))
+            .map_err(|e| anyhow::anyhow!("Failed to create tasks dir: {}", e))?;
+
         // We leave the file creation to the Agent in the New Project phase.
 
         Ok(path_str)

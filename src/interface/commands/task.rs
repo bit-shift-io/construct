@@ -96,8 +96,10 @@ where C: ChatProvider + Clone + Send + Sync + 'static
              room.active_agent = Some("default".to_string());
         }
         
-        // Reset Phase to Planning
-        room.task_phase = crate::application::state::TaskPhase::Planning;
+        // Reset Phase to Planning, UNLESS we are in NewProject phase (from wizard)
+        if room.task_phase != crate::application::state::TaskPhase::NewProject {
+            room.task_phase = crate::application::state::TaskPhase::Planning;
+        }
         
         if create_new_folder {
              // Create Task Subfolder Logic
@@ -155,11 +157,12 @@ where C: ChatProvider + Clone + Send + Sync + 'static
     let agent_name_owned = agent_name.clone();
 
     let handle = tokio::spawn(async move {
-        match engine_clone.run_task(&chat_clone, &task_owned, display_task_owned.as_deref(), &agent_name_owned, workdir_owned).await {
-            Ok(completed) => {
-                if completed {
-                    let _ = chat_clone.send_notification(crate::strings::messages::TASK_COMPLETE).await;
-                }
+        match engine_clone.run_task(&chat_clone, &task_owned, display_task_owned.as_deref(), &agent_name_owned, workdir_owned, None, None).await {
+            Ok(_) => {
+                // We assume success if Ok
+                // do NOT send TASK_COMPLETE here. 
+                // engine.rs handles "Plan Generated" notification for Planning phase.
+                // For Execution phase, we use start.rs.
             }
             Err(e) => {
                 let _ = chat_clone.send_notification(&crate::strings::messages::task_failed(&e.to_string())).await;

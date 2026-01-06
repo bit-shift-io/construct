@@ -1,6 +1,9 @@
 {{CWD}}
 
 # Project Context
+## Previous Conversation / History
+{{HISTORY}}
+
 ## Original Requirements
 {{ORIGINAL_REQUIREMENTS}}
 
@@ -52,19 +55,7 @@ Produce the necessary documentation and specifications for the Engineering Team.
 # Current Status
 NEXT action regarding artifacts?
 
-## AVAILABLE TOOLS
-1. **Write File**:
-```write path/to/file
-Content...
-```
-2. **Read File**:
-```read path/to/file```
-3. **List Directory**:
-```list path/to/dir```
-
-## RULES
-1. Use `write` only.
-2. NO commentary blocks.
+{{TOOLS}}
 
 ## REFERENCE TEMPLATES
 You may use the following template for `plan.md`:

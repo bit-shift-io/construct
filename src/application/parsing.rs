@@ -49,8 +49,8 @@ pub fn parse_actions(response: &str) -> Vec<AgentAction> {
     }
 
     // Regex for ListDir
-    // ```list path/to/dir```
-    let list_regex = Regex::new(r"```list\s+([^`]+)```").unwrap();
+    // Supports ```list path``` and `list path` and multi-line blocks
+    let list_regex = Regex::new(r"(?:```|`)list\s+([^`]+?)\s*(?:```|`)").unwrap();
     for caps in list_regex.captures_iter(response) {
         if let Some(path) = caps.get(1) {
             actions.push(AgentAction::ListDir(path.as_str().trim().to_string()));
@@ -69,7 +69,16 @@ pub fn parse_actions(response: &str) -> Vec<AgentAction> {
             actions.push(AgentAction::ShellCommand(cmd.as_str().trim().to_string()));
         }
     }
-    
+
+    // Regex for SwitchMode
+    // Supports ```switch_mode phase``` and `switch_mode phase` and multi-line blocks
+    let switch_regex = Regex::new(r"(?:```|`)switch_mode\s+([a-zA-Z_]+)\s*(?:```|`)").unwrap();
+    for caps in switch_regex.captures_iter(response) {
+        if let Some(phase) = caps.get(1) {
+            actions.push(AgentAction::SwitchMode(phase.as_str().trim().to_string()));
+        }
+    }
+        
     if response.contains("NO_MORE_STEPS") || response.contains("DONE") { // Support both for safety
          actions.push(AgentAction::Done);
     }

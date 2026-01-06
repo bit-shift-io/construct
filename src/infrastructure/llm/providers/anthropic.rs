@@ -94,6 +94,18 @@ struct AnthropicUsage {
     cache_read_input_tokens: Option<u32>,
 }
 
+/// Anthropic Models API response
+#[derive(Debug, Deserialize)]
+struct AnthropicModelList {
+    data: Vec<AnthropicModelInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnthropicModelInfo {
+    id: String,
+}
+
+
 /// Execute a chat request using Anthropic's API
 pub async fn chat(config: ProviderConfig, context: Context) -> Result<Response, Error> {
     let base_url = config
@@ -249,4 +261,33 @@ pub async fn chat(config: ProviderConfig, context: Context) -> Result<Response, 
         },
         cached: cached_tokens.is_some(),
     })
+}
+
+/// List available models from Anthropic API
+pub async fn list_models(config: ProviderConfig) -> Result<Vec<String>, Error> {
+    let base_url = config
+        .base_url
+        .unwrap_or_else(|| "https://api.anthropic.com".to_string());
+    
+    let url = format!("{}/v1/models", base_url);
+    let api_version = "2023-06-01";
+
+    let response = http_client()
+        .get(&url)
+        .header("x-api-key", config.api_key)
+        .header("anthropic-version", api_version)
+        .send()
+        .await
+        .map_err(|e| Error::new("anthropic", format!("HTTP request failed: {}", e)))?;
+
+    if !response.status().is_success() {
+        return Err(Error::new("anthropic", format!("HTTP {}", response.status())));
+    }
+
+    let model_list: AnthropicModelList = response
+        .json()
+        .await
+        .map_err(|e| Error::new("anthropic", format!("Failed to parse response: {}", e)))?;
+
+    Ok(model_list.data.into_iter().map(|m| m.id).collect())
 }

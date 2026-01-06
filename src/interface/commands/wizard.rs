@@ -3,13 +3,16 @@
 //! Handles interactive wizard steps for creating projects or tasks.
 //! Managed by `RoomState`'s `WizardState`.
 
-use crate::application::state::{BotState, WizardStep};
+use crate::application::state::{BotState, WizardStep, WizardMode};
+
 use crate::domain::config::AppConfig;
 use crate::domain::traits::ChatProvider;
 use crate::application::project::ProjectManager;
+use crate::infrastructure::llm::Client;
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use serde_json;
 pub enum WizardAction {
     Continue,
     TransitionToTask {
@@ -28,7 +31,9 @@ pub async fn handle_step(
     message: &str,
 ) -> Result<WizardAction> {
     let mut create_params: Option<String> = None;
+
     let mut handover_context: Option<(String, Option<String>, String, bool)> = None; // (prompt, display_prompt, workdir, create_new_folder)
+    let mut run_status_update = false;
 
     {
         let mut guard = state.lock().await;
@@ -142,14 +147,110 @@ pub async fn handle_step(
                      room_state.wizard.buffer.push_str(input);
                  }
             }
+            Some(WizardStep::AgentSelection) => {
+                let available_str = room_state.wizard.data.get("available_agents").cloned().unwrap_or_default();
+                let agents: Vec<&str> = if available_str.is_empty() {
+                     // Fallback (shouldn't happen if initialized correctly)
+                     vec!["zai", "gemini", "groq", "anthropic", "openai"]
+                } else {
+                     available_str.split(',').collect()
+                };
+
+                if let Ok(idx) = input.parse::<usize>() {
+                    if idx > 0 && idx <= agents.len() {
+                        let selected_agent = agents[idx - 1];
+                        room_state.wizard.data.insert("agent".to_string(), selected_agent.to_string());
+                        room_state.wizard.step = Some(WizardStep::ModelSelection);
+                        
+                        // List Models (Dynamic)
+                        let client = Client::new(config.clone());
+                        let models = match client.list_models(selected_agent).await {
+                            Ok(mut list) => {
+                                // Sort by display name (second element)
+                                list.sort_by(|a, b| a.1.cmp(&b.1));
+                                list
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to fetch models for {}: {}. Client fallback failed.", selected_agent, e);
+                                vec![]
+                            }
+                        };
+                         
+                        // Cache/Store active list in room state so we can validate selection next
+                         if let Ok(json_str) = serde_json::to_string(&models) {
+                             room_state.wizard.data.insert("model_list_cache".to_string(), json_str);
+                         }
+
+                        let mut msg = format!("Select a Model for **{}**:\n", selected_agent);
+                        for (i, (_id, name)) in models.iter().enumerate() {
+                            msg.push_str(&format!("{}. {}\n", i + 1, name));
+                        }
+                        
+                         if let Some(feed) = &feed_manager {
+                            let mut f = feed.lock().await;
+                            f.clean_stack();
+                            f.add_checkpoint("Agent".to_string(), selected_agent.to_string());
+                            f.add_prompt(msg);
+                            f.update_feed(chat).await?;
+                        } else {
+                            let _ = chat.send_message(&msg).await;
+                        }
+                    } else {
+                        let _ = chat.send_message("Invalid selection. Please enter a number.").await;
+                    }
+                } else {
+                    let _ = chat.send_message("Please enter a number.").await;
+                }
+            }
+            Some(WizardStep::ModelSelection) => {
+                let agent = room_state.wizard.data.get("agent").cloned().unwrap_or_default();
+                
+                // Use cached list from previous step
+                let models: Vec<(String, String)> = if let Some(cache) = room_state.wizard.data.get("model_list_cache") {
+                     serde_json::from_str(cache).unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+
+                 if let Ok(idx) = input.parse::<usize>() {
+                    if idx > 0 && idx <= models.len() {
+                        let selected_model = models[idx - 1].0.clone(); // Use ID
+                        
+                        room_state.active_agent = Some(agent.clone());
+                        room_state.active_model = Some(selected_model.clone());
+                        
+                        room_state.wizard.active = false;
+                        room_state.wizard.step = None;
+                        room_state.wizard.data.clear();
+                        
+                         if let Some(feed) = &feed_manager {
+                            let mut f = feed.lock().await;
+                            f.clean_stack();
+                            // Just update status (Defer to avoid deadlock)
+                            run_status_update = true;
+                            f.update_feed(chat).await?;
+                        } else {
+                             run_status_update = true;
+                        }
+                    } else {
+                         let _ = chat.send_message("Invalid selection. Please enter a number.").await;
+                    }
+                 } else {
+                     let _ = chat.send_message("Please enter a number.").await;
+                 }
+            }
              _ => {
                  room_state.wizard.active = false;
             }
         }
         
-
-
+        
     } // guard drops
+
+    // Independent Status Update (Avods Deadlock)
+    if run_status_update {
+        let _ = crate::interface::commands::misc::handle_status(config, state, chat).await;
+    }
 
     // Creation Logic (Outside main lock)
     if let Some(name) = create_params {
@@ -236,3 +337,90 @@ pub async fn handle_step(
 
     Ok(WizardAction::Continue)
 }
+
+pub async fn start_agent_wizard(
+    config: &AppConfig,
+    state: &Arc<Mutex<BotState>>,
+    chat: &impl ChatProvider,
+) -> Result<()> {
+    // 1. Set State
+    let feed_manager = {
+        let mut guard = state.lock().await;
+        let room = guard.get_room_state(&chat.room_id());
+        room.wizard.active = true;
+        room.wizard.mode = WizardMode::AgentConfig;
+        room.wizard.step = Some(WizardStep::AgentSelection);
+        room.wizard.data.clear();
+        room.feed_manager.clone()
+    };
+
+    // 2. Initial Prompt
+    // Find valid agents for this room
+    let room_id = chat.room_id();
+    let mut allowed_agents: Vec<String> = Vec::new();
+
+    // Check bridges
+    for (_bridge_name, entries) in &config.bridges {
+         let mut is_room_bridge = false;
+         for entry in entries {
+             if let Some(chan) = &entry.channel {
+                 if chan == &room_id {
+                     is_room_bridge = true;
+                 }
+             }
+         }
+         
+         if is_room_bridge {
+             // Collect agents from this bridge
+             for entry in entries {
+                 if let Some(agents_list) = &entry.agents {
+                     for a in agents_list {
+                         allowed_agents.push(a.clone());
+                     }
+                 }
+             }
+         }
+    }
+
+    // Default if no specific config
+    if allowed_agents.is_empty() {
+         // Use all available keys
+         for key in config.agents.keys() {
+             allowed_agents.push(key.clone());
+         }
+         // Sort for stability
+         allowed_agents.sort();
+    }
+    
+    // De-duplicate just in case
+    allowed_agents.sort();
+    allowed_agents.dedup();
+    
+    // Store in data for validation in next step
+    let allowed_str = allowed_agents.join(",");
+    {
+         let mut guard = state.lock().await;
+         let room = guard.get_room_state(&chat.room_id());
+         room.wizard.data.insert("available_agents".to_string(), allowed_str);
+    }
+
+
+    let mut msg = String::from("Select an AI Provider:\n");
+    for (i, agent) in allowed_agents.iter().enumerate() {
+        msg.push_str(&format!("{}. {}\n", i + 1, agent));
+    }
+
+
+    if let Some(feed) = feed_manager {
+        let mut f = feed.lock().await;
+        f.clean_stack();
+        f.add_prompt(msg);
+        f.update_feed(chat).await?;
+    } else {
+         let _ = chat.send_message(&msg).await;
+    }
+
+    Ok(())
+}
+
+

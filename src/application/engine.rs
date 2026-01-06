@@ -43,19 +43,28 @@ impl ExecutionEngine {
     }
 
     /// Primary execution loop
-    pub async fn run_task(&self, chat: &impl ChatProvider, task: &str, display_task: Option<&str>, agent_name: &str, working_dir: Option<String>) -> Result<bool> {
+    pub async fn run_task(&self, chat: &impl ChatProvider, task: &str, display_task: Option<&str>, agent_name: &str, working_dir: Option<String>, override_phase: Option<crate::application::state::TaskPhase>, conversation_history: Option<String>) -> Result<Option<String>> {
         // Initialize Feed
         {
             let mut feed = self.feed.lock().await;
             // Use display_task if provided, otherwise task
             let feed_task = display_task.unwrap_or(task).to_string();
             feed.initialize(feed_task);
+            
+            if matches!(override_phase, Some(crate::application::state::TaskPhase::Conversational)) {
+                feed.mode = crate::application::feed::FeedMode::Conversational;
+            }
+
             let _ = feed.update_feed(chat).await;
         }
 
         let max_steps = 20;
         let mut steps = 0;
         let mut history = String::new();
+        // Pre-seed local history with conversation context if provided
+        if let Some(ctx) = conversation_history {
+            history.push_str(&ctx);
+        }
 
         loop {
             if steps >= max_steps {
@@ -65,7 +74,9 @@ impl ExecutionEngine {
             steps += 1;
 
             // Check for Stop Request & Get Phase
-            let task_phase = {
+            let task_phase = if let Some(p) = &override_phase {
+                p.clone()
+            } else {
                 let mut guard = self.state.lock().await;
                 let room = guard.get_room_state(&chat.room_id());
                 if room.stop_requested {
@@ -77,7 +88,7 @@ impl ExecutionEngine {
                         feed.update_last_entry("Task Stopped".to_string(), false);
                          let _ = feed.update_feed(chat).await;
                     }
-                    return Ok(false); // Stopped
+                    return Ok(None); // Stopped
                 }
                 room.task_phase.clone()
             };
@@ -129,18 +140,21 @@ impl ExecutionEngine {
             
             let prompt = match task_phase {
                 crate::application::state::TaskPhase::Planning => {
-                    // planning_mode_turn(cwd, roadmap, request, plan, architecture, active_task)
+                    // planning_mode_turn(cwd, roadmap, request, plan, architecture, active_task, history)
                     let task_path = active_task_rel_path.as_deref().unwrap_or("tasks/CURRENT");
-                    crate::strings::prompts::planning_mode_turn(&cwd_msg, &roadmap_content, &tasks_content, &plan_content, &architecture_content, task_path)
+                    crate::strings::prompts::planning_mode_turn(&cwd_msg, &roadmap_content, &tasks_content, &plan_content, &architecture_content, task_path, &history)
                 },
                 crate::application::state::TaskPhase::Execution => {
                     let task_path = active_task_rel_path.as_deref().unwrap_or("tasks/CURRENT");
-                    crate::strings::prompts::execution_mode_turn(&cwd_msg, &roadmap_content, &tasks_content, &plan_content, &architecture_content, task_path)
+                    crate::strings::prompts::execution_mode_turn(&cwd_msg, &roadmap_content, &tasks_content, &plan_content, &architecture_content, task_path, &history)
                 },
                 crate::application::state::TaskPhase::NewProject => {
                     // For New Project phase, we still display the just-created files.
                     format!("\n# Current Project Status\n## Roadmap\n{}\n\n## Request\n{}\n\n## Plan\n{}", 
                         roadmap_content, tasks_content, plan_content)
+                },
+                crate::application::state::TaskPhase::Conversational => {
+                    crate::strings::prompts::conversational_mode_turn(&cwd_msg, &roadmap_content, &tasks_content, &plan_content, &history)
                 }
             };
             
@@ -155,8 +169,14 @@ impl ExecutionEngine {
             let _ = chat.typing(true).await;
             
             // Pass agent_name directly to LlmProvider (which routes via Client)
+            let start = std::time::Instant::now();
             let response = match self.llm.completion(&full_prompt, agent_name).await {
-                Ok(r) => r,
+                Ok(r) => {
+                    let duration = start.elapsed();
+                    tracing::info!("[PERF] LLM Request took {}ms for prompt length {}", duration.as_millis(), full_prompt.len());
+                    tracing::info!("DEBUG RAW LLM RESPONSE:\n{}", r);
+                    r
+                },
                 Err(e) => {
                     let _ = chat.send_notification(&format!("LLM Error: {}", e)).await;
                     break;
@@ -170,7 +190,20 @@ impl ExecutionEngine {
 
             if actions.is_empty() {
                 // Conversational response
-                let _ = chat.send_message(&response).await;
+                match task_phase {
+                    crate::application::state::TaskPhase::Conversational => {
+                        {
+                            let mut feed = self.feed.lock().await;
+                            feed.set_completion(response.clone());
+                            let _ = feed.update_feed(chat).await;
+                        }
+                        return Ok(Some(response));
+                    }
+                    _ => {
+                         let _ = chat.send_message(&response).await;
+                    }
+                }
+
                 // Wait for user reply? Or stop? 
                 // For "Task" execution, we usually expect actions.
                 // If it's just talking, we can consider the loop "paused" or "waiting for user".
@@ -181,6 +214,22 @@ impl ExecutionEngine {
 
             // 4. Execute Actions
             for action in actions {
+                // Poll for Stop Request between actions
+                {
+                    let mut guard = self.state.lock().await;
+                    let room = guard.get_room_state(&chat.room_id());
+                    if room.stop_requested {
+                        room.stop_requested = false;
+                        let _ = chat.send_notification("🛑 **Task Stopped by User (Interrupted)**").await;
+                        {
+                            let mut feed = self.feed.lock().await;
+                            feed.update_last_entry("Task Stopped".to_string(), false);
+                            let _ = feed.update_feed(chat).await;
+                        }
+                        return Ok(None);
+                    }
+                }
+
                 match action {
                     crate::domain::types::AgentAction::Done => {
                         // Only squash if we are truly done (Execution Phase)
@@ -223,24 +272,29 @@ impl ExecutionEngine {
                                      let _ = feed.update_feed(chat).await;
                                 }
 
-                                // Send Architecture
-                                let _ = chat.send_message(&architecture).await;
-
-                                // Send Roadmap
-                                let _ = chat.send_message(&roadmap).await;
+                                // Don't spam chat with full docs.
+                                // The user can read files if needed, or we rely on the Plan summary.
                                 
-                                // Send Plan + Footer
+                                // If New Project OR refining the initial plan (001-init), show full roadmap and architecture
+                                let is_init_task = active_task_rel_path.as_deref().map(|s| s.contains("001-init")).unwrap_or(false);
+                                
+                                if matches!(task_phase, crate::application::state::TaskPhase::NewProject) || is_init_task {
+                                    let _ = chat.send_message(&architecture).await;
+                                    let _ = chat.send_message(&roadmap).await;
+                                }
+
+                                // Send Plan + Footer only
                                 let _ = chat.send_message(&format!("{}\n\n✅ **Plan Generated**: Type `.start` to proceed or `.ask` to refine.", plan)).await;
 
-                                return Ok(false); 
+                                return Ok(Some("Planning Completed. Plan available for review.".to_string()));
                             },
-                            crate::application::state::TaskPhase::Execution => {
+                            crate::application::state::TaskPhase::Execution | crate::application::state::TaskPhase::Conversational => {
                                 {
                                     let mut feed = self.feed.lock().await;
                                     feed.process_action(&crate::domain::types::AgentAction::Done).await; // This squashes
                                     let _ = feed.update_feed(chat).await;
                                 }
-                                return Ok(true); 
+                                return Ok(Some("Task Completed.".to_string())); 
                             }
                         }
                     }
@@ -260,7 +314,22 @@ impl ExecutionEngine {
                          let client = self.tools.lock().await;
                          // Resolve path
                          let resolved_path = if Path::new(&path).is_absolute() {
-                             path.clone()
+                             // Smart Resolution:
+                             // If path matches projects_root prefix, use it.
+                             // If not, check if prepending projects_root works (Sandbox View).
+                             if let Some(root) = projects_root.as_deref() {
+                                 if path.starts_with(root) {
+                                     path.clone()
+                                 } else {
+                                     // Try treating it as relative to root
+                                     let stripped = path.trim_start_matches('/');
+                                     let candidate = format!("{}/{}", root.trim_end_matches('/'), stripped);
+                                     tracing::info!("Sandbox Resolution: Mapped virtual path '{}' to real path '{}'", path, candidate);
+                                     candidate
+                                 }
+                             } else {
+                                 path.clone()
+                             }
                          } else {
                              if let Some(wd) = &working_dir {
                                  format!("{}/{}", wd, path)
@@ -278,9 +347,9 @@ impl ExecutionEngine {
                          {
                              let mut feed = self.feed.lock().await;
                              if success {
-                                 feed.replace_last_activity(format!("✅ Listed `{}`", sanitized), true);
+                                 feed.replace_last_activity(format!("Listed `{}`", sanitized), true);
                              } else {
-                                 feed.replace_last_activity(format!("❌ Listed `{}`", sanitized), false);
+                                 feed.replace_last_activity(format!("Listed `{}`", sanitized), false);
                              }
                              let _ = feed.update_feed(chat).await;
                          }
@@ -321,7 +390,16 @@ impl ExecutionEngine {
                          let client = self.tools.lock().await;
                          // Resolve path against working_dir
                          let resolved_path = if Path::new(&path).is_absolute() {
-                             path.clone()
+                             if let Some(root) = projects_root.as_deref() {
+                                 if path.starts_with(root) {
+                                     path.clone()
+                                 } else {
+                                     let stripped = path.trim_start_matches('/');
+                                     format!("{}/{}", root.trim_end_matches('/'), stripped)
+                                 }
+                             } else {
+                                 path.clone()
+                             }
                          } else {
                              if let Some(wd) = &working_dir {
                                  format!("{}/{}", wd, path)
@@ -356,8 +434,23 @@ impl ExecutionEngine {
                              let _ = feed.update_feed(chat).await;
                          }
                          let client = self.tools.lock().await;
+                         
+                         let projects_root = {
+                                let f = self.feed.lock().await;
+                                f.projects_root()
+                         };
+
                          let resolved_path = if Path::new(&path).is_absolute() {
-                             path.clone()
+                             if let Some(root) = projects_root.as_deref() {
+                                 if path.starts_with(root) {
+                                     path.clone()
+                                 } else {
+                                     let stripped = path.trim_start_matches('/');
+                                     format!("{}/{}", root.trim_end_matches('/'), stripped)
+                                 }
+                             } else {
+                                 path.clone()
+                             }
                          } else {
                              if let Some(wd) = &working_dir {
                                  format!("{}/{}", wd, path)
@@ -458,13 +551,61 @@ impl ExecutionEngine {
                             let _ = feed.update_feed(chat).await;
                         }
 
-                        // Append to history
-                        history.push_str(&format!("\nOutput:\n{}\n", out_str));
+                         history.push_str(&format!("\nOutput:\n{}\n", out_str));
                     }
+                     crate::domain::types::AgentAction::SwitchMode(phase) => {
+                          tracing::info!("DEBUG: SwitchMode action triggered with phase raw: '{}'", phase);
+                          let new_phase = match phase.to_lowercase().as_str() {
+                              "planning" | "architect" => crate::application::state::TaskPhase::Planning,
+                              "execution" | "developer" => crate::application::state::TaskPhase::Execution,
+                              "conversational" => crate::application::state::TaskPhase::Conversational,
+                              _ => {
+                                  tracing::warn!("DEBUG: Invalid SwitchMode phase: '{}'", phase);
+                                  history.push_str(&format!("\nSystem: Invalid mode '{}'. Use 'planning' or 'execution'.\n", phase));
+                                  continue;
+                              }
+                          };
+                          tracing::info!("DEBUG: SwitchMode resolved to phase: {:?}", new_phase);
+                          
+                          // If New Project, show full roadmap and architecture BEFORE switching
+                          if matches!(task_phase, crate::application::state::TaskPhase::NewProject) {
+                                let (roadmap, architecture, plan) = if let Some(wd) = &working_dir {
+                                    let client = self.tools.lock().await;
+                                    let r = client.read_file(&format!("{}/specs/roadmap.md", wd)).await.unwrap_or_else(|_| "(No roadmap.md)".into());
+                                    let a = client.read_file(&format!("{}/specs/architecture.md", wd)).await.unwrap_or_else(|_| "(No architecture.md)".into());
+                                    
+                                    let p = if let Some(task_rel) = &active_task_rel_path {
+                                         let plan_path = format!("{}/{}/plan.md", wd, task_rel);
+                                         client.read_file(&plan_path).await.unwrap_or_else(|_| "(No plan.md)".into())
+                                    } else {
+                                         "(No active task plan)".into()
+                                    };
+                                    (r, a, p)
+                                } else {
+                                    ("(No roadmap)".into(), "(No architecture)".into(), "(No plan)".into())
+                                };
+
+                                let _ = chat.send_message(&architecture).await;
+                                let _ = chat.send_message(&roadmap).await;
+                                let _ = chat.send_message(&format!("{}\n", plan)).await;
+                          }
+
+                          {
+                              let mut guard = self.state.lock().await;
+                              let room = guard.get_room_state(&chat.room_id());
+                              room.task_phase = new_phase.clone();
+                          }
+
+                          // Notification removed to reduce feed noise
+                          // let _ = chat.send_notification(&format!("🔄 **Switching to {:?} Mode**", new_phase)).await;
+                          
+                          // Break action loop to re-prompt with new phase immediately
+                          break; 
+                     }
                 }
             }
         }
         
-        Ok(true) // Loop finished (max steps or conversational break) - default to success? Or failure?
+        Ok(None) // Loop finished
     }
 }

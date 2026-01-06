@@ -154,15 +154,51 @@ impl CommandRouter {
                  };
                  
                  if let Some(wd) = workdir {
+                     // Check for conversation.md (Active Conversation)
+                     let active_task = {
+                         let guard = self.state.lock().await;
+                         guard.rooms.get(&chat.room_id()).and_then(|r| r.active_task.clone())
+                     };
+                     
+                     let conversation_path = if let Some(task_rel) = &active_task {
+                         std::path::Path::new(&wd).join(task_rel).join("conversation.md")
+                     } else {
+                         std::path::Path::new(&wd).join("conversation.md")
+                     };
+                     
+                     // Helper validation
+                     let conversation_active = {
+                         let t = self.tools.lock().await;
+                         // Check fast usage? Or just try read?
+                         // We can just rely on the file existing.
+                         // But we can't easily check existence. 
+                         // We'll trust checking if we can "read metadata" or similar?
+                         // Using read_file might be heavy if big? typically small.
+                         match t.read_file(&conversation_path.to_string_lossy().to_string()).await {
+                             Ok(_) => true,
+                             Err(_) => false,
+                         }
+                     };
+
+                     if conversation_active {
+                          // Continue Conversation
+                          commands::misc::handle_ask(&self.config, &self.state, self.tools.clone(), &self.llm, chat, "yes").await?;
+                          return Ok(());
+                     }
+
                      // Check if plan.md exists?
-                     // Verify via tools
+                     let plan_path = if let Some(task_rel) = &active_task {
+                         std::path::Path::new(&wd).join(task_rel).join("plan.md")
+                     } else {
+                         std::path::Path::new(&wd).join("plan.md")
+                     };
+
                      let plan_exists = {
-                         let _t = self.tools.lock().await;
-                         let _path = std::path::Path::new(&wd).join("plan.md");
-                         // We can't easily check existence with current ToolExecutor without read/list.
-                         // Let's just assume and try to run.
-                         // Or use "ls"?
-                         true 
+                         let t = self.tools.lock().await;
+                         match t.read_file(&plan_path.to_string_lossy().to_string()).await {
+                             Ok(_) => true,
+                             Err(_) => false,
+                         }
                      };
 
                      if plan_exists {
@@ -188,11 +224,10 @@ impl CommandRouter {
                              self.state.clone(),
                          );
                          
-                         let _ = chat.send_message("🚀 **Executing Plan**...").await;
-                         // Execute Plan
-                         commands::task::handle_task(&self.state, &engine, chat, "Execute the implementation details described in `plan.md`. Implement the code.", None, Some(wd), false).await?;
+                         // Use handle_start for Execution Phase
+                         commands::start::handle_start(&self.state, &engine, chat, Some(wd.clone())).await?;
                      } else {
-                         let _ = chat.send_message("No active project or plan found to continue.").await;
+                         let _ = chat.send_message("No active conversation or plan found to continue.").await;
                      }
                  } else {
                       let _ = chat.send_message("You are not in a project directory.").await;
@@ -264,6 +299,9 @@ impl CommandRouter {
             }
             ".help" => {
                 commands::help::handle_help(chat).await?;
+            }
+            ".agent" => {
+                commands::agent::handle_agent(&self.config, &self.state, chat, args).await?;
             }
             ".project" => {
                 commands::project::handle_project(&self.config, &self.project_manager, &self.state, chat, args).await?;

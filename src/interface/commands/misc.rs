@@ -16,29 +16,29 @@ pub async fn handle_status(
     state: &Arc<Mutex<BotState>>,
     chat: &impl ChatProvider,
 ) -> Result<()> {
-    let state_guard = state.lock().await;
-    let room_state = state_guard.rooms.get(&chat.room_id());
+    let mut guard = state.lock().await;
+    let room_state = guard.get_room_state(&chat.room_id());
     
-    if let Some(s) = room_state {
-        let project = crate::application::utils::sanitize_path(
-            s.current_project_path.as_deref().unwrap_or("None"),
-            config.system.projects_dir.as_deref()
-        );
-        let cwd = crate::application::utils::sanitize_path(
-            s.current_working_dir.as_deref().unwrap_or("Default"),
-            config.system.projects_dir.as_deref()
-        );
-        
-        let msg = crate::strings::messages::room_status_msg(
-            &project,
-            &cwd,
-            s.active_model.as_deref().unwrap_or("Default"),
-            s.active_agent.as_deref().unwrap_or("Default")
-        );
-        chat.send_message(&msg).await.map_err(|e| anyhow::anyhow!(e))?;
-    } else {
-        chat.send_message(crate::strings::messages::NO_ACTIVE_STATE).await.map_err(|e| anyhow::anyhow!(e))?;
-    }
+    let project = crate::application::utils::sanitize_path(
+        room_state.current_project_path.as_deref().unwrap_or("None"),
+        config.system.projects_dir.as_deref()
+    );
+    let cwd = crate::application::utils::sanitize_path(
+        room_state.current_working_dir.as_deref().unwrap_or("Default"),
+        config.system.projects_dir.as_deref()
+    );
+    
+    let msg = crate::strings::messages::room_status_msg(
+        &project,
+        &cwd,
+        room_state.active_model.as_deref().unwrap_or("Default"),
+        room_state.active_agent.as_deref().unwrap_or("Default")
+    );
+    
+    // Save state if it was created
+    guard.save();
+    
+    chat.send_message(&msg).await.map_err(|e| anyhow::anyhow!(e))?;
     Ok(())
 }
 
@@ -57,119 +57,158 @@ where C: ChatProvider + Clone + Send + Sync + 'static
         return Ok(());
     }
 
-    // 0. Check for Planning Phase (Refinement Mode)
-    // We only divert to "Refine Plan" if we are consistently in Planning Mode AND have a project.
-    let (is_planning, workdir, feed_manager) = {
+    // 1. Resolve Workdir and Feed
+    let (workdir, active_task, feed_manager) = {
         let guard = state.lock().await;
         if let Some(r) = guard.rooms.get(&chat.room_id()) {
             (
-                r.task_phase == crate::application::state::TaskPhase::Planning || r.task_phase == crate::application::state::TaskPhase::NewProject,
                 r.current_working_dir.clone(),
+                r.active_task.clone(),
                 r.feed_manager.clone()
             )
         } else {
-            (false, None, None)
+            (None, None, None)
         }
     };
 
-    if is_planning && workdir.is_some() {
-        let wd = workdir.unwrap();
-        // Check if we assume valid project context (e.g. plan.md exists?)
-        // The user prompted: "Review implementation_plan.md. Type .start to proceed or .ask to refine."
-        // So we strictly follow that.
-        
-        let feed_id = {
-             let guard = state.lock().await;
-             guard.rooms.get(&chat.room_id()).and_then(|r| r.feed_event_id.clone())
-        };
-        let feed = feed_manager.unwrap_or_else(|| Arc::new(Mutex::new(crate::application::feed::FeedManager::new(
-            Some(wd.clone()), 
-            config.system.projects_dir.clone(), 
-            tools.clone(),
-            feed_id
-        ))));
-        
-        // ensure feed in state? (Is usually already there if we got it from state)
-        // If it wasn't there, we made new one.
-        
-        let engine = crate::application::engine::ExecutionEngine::new(
-            config.clone(),
-            llm.clone(), // We need a clone of Arc<dyn LlmProvider>
-            tools.clone(),
-            feed.clone(),
-            state.clone()
-        );
+    let feed_id = {
+         let guard = state.lock().await;
+         guard.rooms.get(&chat.room_id()).and_then(|r| r.feed_event_id.clone())
+    };
+    
+    let feed = feed_manager.unwrap_or_else(|| Arc::new(Mutex::new(crate::application::feed::FeedManager::new(
+        workdir.clone(), 
+        config.system.projects_dir.clone(), 
+        tools.clone(),
+        feed_id
+    ))));
 
-        // We use handle_task to ensure proper spawning and active_agent handling
-        // Pass "Refine the plan based on: <args>" as the task? 
-        // Or just the args?
-        // If we pass just args, the prompt "Analyze the request... Create or update..." should handle it.
-        // It's safer to prepend context maybe? 
-        // "Update the plan: <args>"
-        let task_prompt = format!("Refine the plan: {}", args);
-        
-        return crate::interface::commands::task::handle_task(state, &engine, chat, &task_prompt, None, Some(wd), false).await;
-    }
+    let engine = crate::application::engine::ExecutionEngine::new(
+        config.clone(),
+        llm.clone(),
+        tools.clone(),
+        feed.clone(),
+        state.clone()
+    );
 
-    // 1. Gather Context (Standard Q&A)
-    let mut context = String::new();
-    let (model, project_path) = {
+    // 2. Resolve Active Agent
+    let agent_name = {
         let guard = state.lock().await;
-        let rs = guard.rooms.get(&chat.room_id());
-        (
-            rs.and_then(|r| r.active_model.clone()),
-            rs.and_then(|r| r.current_project_path.clone())
-        )
+        guard.rooms.get(&chat.room_id())
+            .and_then(|r| r.active_agent.clone())
+            .unwrap_or_else(|| "default".to_string())
     };
+    
+    // 3. Resolve History Path
+    // If active task: {wd}/{task}/conversation.md
+    // Else: {wd}/conversation.md
+    let history_path = if let Some(wd) = &workdir {
+         if let Some(task_rel) = &active_task {
+             std::path::Path::new(wd).join(task_rel).join("conversation.md")
+         } else {
+             std::path::Path::new(wd).join("conversation.md")
+         }
+    } else {
+         std::path::PathBuf::from("conversation.md")
+    };
+    let history_path_str = history_path.to_string_lossy().to_string();
 
-    if let Some(path) = project_path {
-        // Try reading tasks.md or roadmap.md
-        // We use tools via lock
-        let client = tools.lock().await;
-        if let Ok(content) = client.read_file(&format!("{}/tasks.md", path)).await {
-            context.push_str("\n\nCurrent Tasks Context:\n");
-            context.push_str(&content);
-        } else if let Ok(content) = client.read_file(&format!("{}/roadmap.md", path)).await {
-            context.push_str("\n\nRoadmap Context:\n");
-            context.push_str(&content);
-        }
+    // 4. Read History
+    let mut history_content = String::new();
+    {
+         let client = tools.lock().await;
+         // Try reading
+         if let Ok(content) = client.read_file(&history_path_str).await {
+              history_content = content;
+         }
     }
 
-    // 2. Construct System Prompt
-    let system_prompt = format!(
-        "You are a helpful coding assistant.\n{}{}", 
-        if context.is_empty() { "" } else { "Use the following context to answer:\n" },
-        context
-    );
-
-    // 2. Construct Prompt (Simple text for now, since LlmProvider is text-completion-based in traits)
-    let prompt = format!(
-        "{}\n\nUser: {}", 
-        system_prompt,
-        args
-    );
-
-    // 3. Send to LLM
-    chat.typing(true).await.map_err(|e| anyhow::anyhow!(e))?;
+    // 5. Run Task (Conversational Mode Default, but allow Switching)
+    let task_prompt = args.to_string();
     
-    // Use default model if none selected
-    let model_id = model.as_deref().unwrap_or("gemini-1.5-pro-latest"); // Default fallback
+    // 5. Run Task Loop
+    let mut current_prompt = args.to_string();
+    let _task_prompt = args.to_string(); // Keep original if needed or just use args
+    let mut current_history = history_content.clone();
     
-    // cast Arc<dyn LlmProvider> ???
-    // The `llm` param is `&Arc<dyn LlmProvider>`.
-    // completion takes `&self`.
-    
-    let response = llm.completion(&prompt, model_id).await;
+    // Reset Phase to Conversational initially
+    {
+        let mut guard = state.lock().await;
+        // Only reset if we are NOT already in a task? 
+        // User expects .ask to start fresh conversation or continue?
+        // Usually .ask implies conversational entry.
+        let room = guard.get_room_state(&chat.room_id());
+        room.task_phase = crate::application::state::TaskPhase::Conversational;
+    }
 
-    chat.typing(false).await.map_err(|e| anyhow::anyhow!(e))?;
+    loop {
+        // Run engine
+        // We pass None for override_phase so it uses the RoomState phase (which might have just changed)
+        // We pass current_history to seed context.
+        let result = engine.run_task(chat, &current_prompt, None, &agent_name, workdir.clone(), None, Some(current_history.clone())).await?;
 
-    match response {
-        Ok(ans) => {
-            chat.send_message(&ans).await.map_err(|e| anyhow::anyhow!(e))?;
+        // 6. Update History with Turn
+        if let Some(response) = &result {
+             let new_entry = format!("\n**User**: {}\n\n**Agent**: {}\n", current_prompt, response);
+             current_history.push_str(&new_entry);
+             
+             // Write back
+             let client = tools.lock().await;
+             let _ = client.write_file(&history_path_str, &current_history).await;
         }
-        Err(e) => {
-             chat.send_notification(&crate::strings::messages::llm_error(&e.to_string())).await.map_err(|e| anyhow::anyhow!(e))?;
+
+        // Check if we should continue (Mode Switched?)
+        let current_phase = {
+             let mut guard = state.lock().await;
+             guard.get_room_state(&chat.room_id()).task_phase.clone()
+        };
+        
+        tracing::info!("DEBUG: .ask loop check. Result is None? {}. Current Phase: {:?}", result.is_none(), current_phase);
+
+        if result.is_none() {
+            // Engine returned None. 
+            // Could be Stop Requested OR SwitchMode.
+            // If Stop Requested, room state stop flag is already cleared.
+            // If SwitchMode, phase is different.
+            
+            // How do we distinguish? 
+            // If SwitchMode happened, engine.rs sets phase.
+            // If we are in Planning/Execution, we should probably auto-continue with "Perform Next Step".
+            
+            if current_phase != crate::application::state::TaskPhase::Conversational {
+                 // Auto-continue!
+                 // What is the prompt? 
+                 // If we just switched, the prompt should probably be "Continue" or empty?
+                 // Engine will generate prompt based on phase. 
+                 // We can pass empty task prompt?
+                 
+                 // Check if we switched to a non-Conversational phase
+                 if matches!(current_phase, crate::application::state::TaskPhase::Conversational) {
+                     // No mode switch happened, so we are purely done with this turn.
+                     break;
+                 }
+                 
+                 // SAFETY: If we switched to EXECUTION, we should STOP and ask for confirmation.
+                 if matches!(current_phase, crate::application::state::TaskPhase::Execution) {
+                     let _ = chat.send_message("⚠️ **Plan Approved (Auto-Stop)**: The agent is ready to execute. Please type `.start` to begin implementation.").await;
+                     break;
+                 }
+
+                 // Continue loop for Planning/Verification
+                 current_prompt = "Proceed with next step.".to_string();
+                 tracing::info!("Auto-continuing .ask loop in {:?} phase", current_phase);
+                 continue;
+            } else {
+                 tracing::info!("DEBUG: Result None but phase is Conversational. Breaking loop.");
+            }
+        } else {
+             tracing::info!("DEBUG: Result is Some (Response received). Breaking loop.");
         }
+        
+        // If we got a response, or if we are in Conversational mode and done, break.
+        // Usually Conversational returns Some(response).
+        
+        break;
     }
 
     Ok(())

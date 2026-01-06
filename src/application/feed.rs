@@ -17,6 +17,7 @@ pub enum FeedMode {
     PlanReview,
     Final,
     Wizard,
+    Conversational,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -123,8 +124,9 @@ pub struct FeedManager {
     _tools: SharedToolExecutor,
     
     // New fields for Plan Review
-    plan_content: Option<String>,
-    roadmap_content: Option<String>,
+    pub plan_content: Option<String>,
+    pub roadmap_content: Option<String>,
+    pub completion_message: Option<String>,
 }
 
 impl FeedManager {
@@ -145,6 +147,7 @@ impl FeedManager {
             _tools: tools,
             plan_content: None,
             roadmap_content: None,
+            completion_message: None,
         }
     }
 
@@ -154,8 +157,24 @@ impl FeedManager {
         self.mode = FeedMode::Active;
         self.recent_activities.clear();
         self.feed_event_id = None; 
+        self.completion_message = None;
         
         self.add_activity("Task Started".to_string());
+    }
+
+    /// Starts a fresh block for a new Phase (e.g. Planning, Execution).
+    /// This prevents "wall of text" by forcing a new message and clearing previous activities.
+    pub fn start_new_block(&mut self, label: String) {
+        // Archive current state? 
+        // For now, just reset for the new view.
+        self.recent_activities.clear();
+        self.feed_event_id = None; // Force new message
+        self.completion_message = None;
+        self.add_activity(label);
+    }
+
+    pub fn set_completion(&mut self, message: String) {
+        self.completion_message = Some(message);
     }
 
     // --- Type-Specific Add Methods ---
@@ -170,6 +189,27 @@ impl FeedManager {
 
     pub fn add_activity(&mut self, content: String) {
         let activity_log = format!("• {}", content);
+        
+        // Deduplicate: If the last activity is identical (ignoring status icon), do nothing.
+        if let Some(last) = self.recent_activities.last() {
+             // Strip known prefixes
+             let clean_last = last.trim_start_matches("✅ ").trim_start_matches("❌ ").trim_start_matches("• ").trim_start_matches("🔄 ");
+             let clean_new = content.trim_start_matches("✅ ").trim_start_matches("❌ ").trim_start_matches("• ").trim_start_matches("🔄 ");
+             
+             // Also handle "Writing file X" vs "Written file X" etc?
+             // Maybe too complex. Let's just catch exact matches of content first.
+             // If input is "Writing file X", and last is "✅ Written file X" -> diff strings.
+             // So this only stops "Writing file X" if last was "Writing file X".
+             
+             if clean_last == clean_new {
+                  return;
+             }
+             
+             // Heuristic: If last was "Written `path`" and new is "Writing `path`", skip?
+             // last: "Written `specs/roadmap.md`"
+             // new: "Writing file `specs/roadmap.md`" -> diff.
+        }
+
         self.recent_activities.push(activity_log);
          if self.recent_activities.len() > 15 {
             self.recent_activities.remove(0);
@@ -239,6 +279,7 @@ impl FeedManager {
             FeedMode::PlanReview => self.format_plan_review(),
             FeedMode::Final => self.format_final(),
             FeedMode::Wizard => self.format_wizard(),
+            FeedMode::Conversational => self.format_conversational(),
         }
     }
     
@@ -348,6 +389,9 @@ impl FeedManager {
             AgentAction::ListDir(path) => {
                 self.add_activity(format!("Listing: `{}`", path));
             }
+            AgentAction::SwitchMode(phase) => {
+                self.add_activity(format!("Switching to mode: {}", phase));
+            }
         }
     }
 
@@ -360,10 +404,38 @@ impl FeedManager {
         content
     }
 
+    fn format_conversational(&self) -> String {
+        let mut content = String::new();
+        
+        // Check if we have meaningful activity (ignore just "Task Started")
+        let has_real_activity = self.recent_activities.iter().any(|a| !a.contains("Task Started"));
+
+        if has_real_activity {
+             content.push_str("**Activity**:\n");
+             for activity in &self.recent_activities {
+                 // Skip Task Started in display if we want to be cleaner? 
+                 // Or keep it. Let's keep it if there are other things.
+                 content.push_str(&format!("{}\n", activity));
+             }
+             content.push_str("\n---\n");
+        }
+        
+        if let Some(msg) = &self.completion_message {
+            content.push_str(msg);
+        } else {
+             content.push_str("Thinking...");
+        }
+        
+        content
+    }
+
     /// Primary Method: Updates the feed message in the chat
     /// Implements Sticky Logic
     pub async fn update_feed(&mut self, chat: &impl ChatProvider) -> Result<()> {
         let content = self.get_feed_content();
+        if content.is_empty() {
+            return Ok(());
+        }
         let latest_event_id = chat.get_latest_event_id().await.map_err(|e| anyhow::anyhow!(e))?;
 
         // Determine if we should edit or send new

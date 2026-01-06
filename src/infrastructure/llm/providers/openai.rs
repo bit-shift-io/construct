@@ -68,6 +68,17 @@ struct OpenAIUsage {
     total_tokens: u32,
 }
 
+#[derive(Debug, Deserialize)]
+struct OpenAIModelList {
+    data: Vec<OpenAIModelInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAIModelInfo {
+    id: String,
+}
+
+
 /// Execute a chat request using OpenAI-compatible API
 pub async fn chat(config: ProviderConfig, context: Context) -> Result<Response, Error> {
     let base_url = config
@@ -162,4 +173,33 @@ pub async fn chat(config: ProviderConfig, context: Context) -> Result<Response, 
         },
         cached: false,
     })
+}
+
+
+
+/// List available models from OpenAI-compatible API
+pub async fn list_models(config: ProviderConfig) -> Result<Vec<String>, Error> {
+    let base_url = config
+        .base_url
+        .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+    
+    let url = format!("{}/models", base_url);
+
+    let response = http_client()
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", config.api_key))
+        .send()
+        .await
+        .map_err(|e| Error::new("openai", format!("HTTP request failed: {}", e)))?;
+
+    if !response.status().is_success() {
+        return Err(Error::new("openai", format!("HTTP {}", response.status())));
+    }
+
+    let model_list: OpenAIModelList = response
+        .json()
+        .await
+        .map_err(|e| Error::new("openai", format!("Failed to parse response: {}", e)))?;
+
+    Ok(model_list.data.into_iter().map(|m| m.id).collect())
 }

@@ -10,5 +10,6 @@ pub enum AgentAction {
     WriteFile(String, String), // path, content
     ReadFile(String), // path
     ListDir(String), // path
+    SwitchMode(String), // phase (planning, execution)
     Done,
 }

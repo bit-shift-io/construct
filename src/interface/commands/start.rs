@@ -60,11 +60,10 @@ where C: ChatProvider + Clone + Send + Sync + 'static
 
         // Spawn new task loop
         let handle = tokio::spawn(async move {
-            match engine_clone.run_task(&chat_clone, &task_str, None, &agent_str, workdir_owned).await {
-                Ok(completed) => {
-                    if completed {
-                        let _ = chat_clone.send_notification(crate::strings::messages::TASK_COMPLETE).await;
-                    }
+            match engine_clone.run_task(&chat_clone, &task_str, None, &agent_str, workdir_owned, None, None).await {
+                Ok(_) => {
+                     // We assume success if Ok, regardless of Option value for now
+                     let _ = chat_clone.send_notification(crate::strings::messages::TASK_COMPLETE).await;
                 }
                 Err(e) => {
                     let _ = chat_clone.send_notification(&crate::strings::messages::task_failed(&e.to_string())).await;

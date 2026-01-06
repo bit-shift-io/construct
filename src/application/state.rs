@@ -18,6 +18,7 @@ pub enum TaskPhase {
     Planning,
     Execution,
     NewProject,
+    Conversational,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -28,6 +29,8 @@ pub enum WizardStep {
     Description, // Accumulate (Project)
     Confirmation,
     TaskDescription, // Accumulate (Task)
+    AgentSelection,
+    ModelSelection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -35,6 +38,7 @@ pub enum WizardMode {
     #[default]
     Project,
     Task,
+    AgentConfig,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -60,10 +64,7 @@ pub struct RoomState {
     pub project_requirements: Option<String>,
     #[serde(default)]
     pub stop_requested: bool,
-    #[serde(default)]
-    pub last_model_list: Vec<String>,
-    #[serde(default)]
-    pub last_agent_list: Vec<String>,
+
     #[serde(default)]
     pub is_task_completed: bool,
     #[serde(skip)]

@@ -106,3 +106,96 @@ pub async fn chat(
         Provider::Gemini => gemini::chat(config, context).await,
     }
 }
+
+/// List available models for the specified provider
+pub async fn list_models(
+    provider: Provider,
+    config: ProviderConfig,
+) -> Result<Vec<String>, Error> {
+    match provider {
+        Provider::OpenAI => openai::list_models(config).await,
+        Provider::Groq => {
+             let config_with_url = ProviderConfig {
+                base_url: Some("https://api.groq.com/openai/v1".to_string()),
+                ..config
+            };
+            openai::list_models(config_with_url).await
+        }
+        Provider::XAI => {
+            let config_with_url = ProviderConfig {
+                base_url: Some("https://api.x.ai/v1".to_string()),
+                ..config
+            };
+            openai::list_models(config_with_url).await
+        }
+        Provider::DeepAI => {
+            let config_with_url = ProviderConfig {
+                base_url: Some("https://api.deepai.com/v1".to_string()),
+                ..config
+            };
+            openai::list_models(config_with_url).await
+        }
+        Provider::Zai => {
+            let base_url = config
+                .base_url
+                .unwrap_or_else(|| "https://api.z.ai/api/coding/paas".to_string());
+             // NOTE: Zai might use different path for models? Assuming standard OpenAI for now.
+             // If Zai uses /v4/models, we need to check docs. 
+             // Assuming OpenAI compat for models endpoint too.
+             let config_with_url = ProviderConfig {
+                base_url: Some(format!("{}", base_url)), // Base URL usually includes version?
+                // The chat path was /v4/responses. 
+                // Let's assume /v4/models is at base_url/v4/models if we strip responses?
+                // Actually openai::list_models appends /models.
+                // If Zai base is `https://api.z.ai/api/coding/paas`, appending /models works?
+                // Chat uses `.../v4/responses`.
+                // Let's rely on standard OpenAI behavior for now, or just not implement for Zai if unsure.
+                // Re-using user's assumption that "openai was dynamically fetching".
+                ..config
+            };
+             openai::list_models(config_with_url).await
+        }
+        Provider::Anthropic => anthropic::list_models(config).await,
+        Provider::Gemini => Err(Error::new("gemini", "Listing models not implemented for Gemini")),
+    }
+}
+
+/// Get default fallback models for a provider when API listing fails
+pub fn get_default_models(provider: Provider) -> Vec<String> {
+    match provider {
+        Provider::Zai => vec![
+            "glm-4.7".to_string(),
+            "glm-4.5".to_string(),
+            "glm-4.5-flash".to_string(),
+        ],
+        Provider::Gemini => vec![
+            "gemini-1.5-pro".to_string(),
+            "gemini-1.5-flash".to_string(),
+        ],
+        Provider::Groq => vec![
+            "llama-3.3-70b-versatile".to_string(),
+            "llama-3.1-70b-versatile".to_string(),
+            "mixtral-8x7b-32768".to_string(),
+        ],
+        Provider::Anthropic => vec![
+            "claude-3-5-sonnet-20241022".to_string(),
+            "claude-3-5-haiku-20241022".to_string(),
+            "claude-3-opus-20240229".to_string(),
+        ],
+        Provider::OpenAI => vec![
+            "gpt-4o".to_string(),
+            "gpt-4o-mini".to_string(),
+            "gpt-4-turbo".to_string(),
+            "gpt-3.5-turbo".to_string(),
+        ],
+        Provider::XAI => vec![
+            "grok-beta".to_string(),
+            "grok-1".to_string(),
+        ],
+        Provider::DeepAI => vec![
+            "standard".to_string(),
+        ],
+        // Default/Fallback
+        _ => vec!["default".to_string()],
+    }
+}

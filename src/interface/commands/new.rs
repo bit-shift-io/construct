@@ -91,6 +91,8 @@ pub async fn handle_new(
                 
                 // Set active task
                 room_state.active_task = Some("tasks/001-init".to_string());
+                // Set phase to NewProject so engine displays roadmap/architecture
+                room_state.task_phase = crate::application::state::TaskPhase::NewProject;
             } // Borrow ends
             guard.save();
             

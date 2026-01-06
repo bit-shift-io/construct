@@ -5,6 +5,7 @@
 
 pub mod new;
 pub mod task;
+pub mod agent;
 pub mod admin;
 pub mod help;
 pub mod project;
