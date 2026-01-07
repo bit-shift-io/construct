@@ -164,6 +164,7 @@ impl FeedManager {
 
     /// Starts a fresh block for a new Phase (e.g. Planning, Execution).
     /// This prevents "wall of text" by forcing a new message and clearing previous activities.
+    #[allow(dead_code)]
     pub fn start_new_block(&mut self, label: String) {
         // Archive current state? 
         // For now, just reset for the new view.

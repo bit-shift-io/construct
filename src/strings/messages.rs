@@ -36,9 +36,6 @@ pub fn command_failed(err: &str) -> String {
     format!("Command Failed: {err}")
 }
 
-pub fn llm_error(err: &str) -> String {
-    format!("LLM Error: {err}")
-}
 
 pub const READ_USAGE: &str = "Usage: `.read <file_path>`";
 pub const ASK_USAGE: &str = "Usage: `.ask <message>`";
@@ -77,7 +74,6 @@ pub fn room_status_msg(
     )
 }
 
-pub const NO_ACTIVE_STATE: &str = "No active state for this room.";
 
 pub const WIZARD_CANCELLED: &str = "❌ Wizard cancelled.";
 // Note: We might want a dynamic one for wizard success to show path, but let's stick to what we see in the code or make it dynamic.

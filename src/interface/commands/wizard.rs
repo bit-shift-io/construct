@@ -310,7 +310,8 @@ pub async fn handle_step(
                          // Prompts usually benefit from being clear about real paths if agent needs to know them,
                          // BUT strict sandbox relies on relative paths anyway.
                          // Displaying simplified path in prompt text is fine as long as CWD is set correctly in backend.
-                                                  let prompt = crate::strings::prompts::new_project_prompt(&name, &description, &sanitized_path);
+                          let current_date = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
+                          let prompt = crate::strings::prompts::new_project_prompt(&name, &description, &sanitized_path, &current_date);
                           // "Generating documentation for project 'a4'."
                           let display_prompt = format!("Generating documentation for project '{}'.", name);
 

@@ -196,6 +196,5 @@ pub fn get_default_models(provider: Provider) -> Vec<String> {
             "standard".to_string(),
         ],
         // Default/Fallback
-        _ => vec!["default".to_string()],
     }
 }

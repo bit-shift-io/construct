@@ -12,7 +12,7 @@ use crate::infrastructure::llm::providers;
 use crate::infrastructure::llm::{Context, Error, Provider, Response};
 use crate::domain::traits::LlmProvider;
 use async_trait::async_trait;
-use tracing::{info, debug, warn};
+use tracing::{debug, warn};
 
 /// Simple LLM client
 pub struct Client {

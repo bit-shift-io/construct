@@ -101,26 +101,29 @@ impl ExecutionEngine {
                  room.active_task.clone()
             };
             
-            let (tasks_content, roadmap_content, architecture_content, plan_content) = if let Some(wd) = &working_dir {
+            let (tasks_content, tasks_checklist_content, roadmap_content, architecture_content, progress_content, plan_content) = if let Some(wd) = &working_dir {
                 let client = self.tools.lock().await;
                 // Specs
                 let roadmap = client.read_file(&format!("{}/specs/roadmap.md", wd)).await.unwrap_or_else(|_| "(No roadmap.md)".into());
                 let architecture = client.read_file(&format!("{}/specs/architecture.md", wd)).await.unwrap_or_else(|_| "(No architecture.md)".into());
+                let progress = client.read_file(&format!("{}/specs/progress.md", wd)).await.unwrap_or_else(|_| "(No progress history yet)".into());
                 
                 // Active Task Context
-                let (request, plan) = if let Some(task_rel) = &active_task_rel_path {
+                let (request, tasks_checklist, plan) = if let Some(task_rel) = &active_task_rel_path {
                      let request_path = format!("{}/{}/request.md", wd, task_rel);
+                     let tasks_path = format!("{}/{}/tasks.md", wd, task_rel);
                      let plan_path = format!("{}/{}/plan.md", wd, task_rel);
                      let r = client.read_file(&request_path).await.unwrap_or_else(|_| "(No request.md)".into());
+                     let t = client.read_file(&tasks_path).await.unwrap_or_else(|_| "(No tasks.md)".into());
                      let p = client.read_file(&plan_path).await.unwrap_or_else(|_| "(No plan.md)".into());
-                     (r, p)
+                     (r, t, p)
                 } else {
-                     ("(No active task context)".into(), "(No active task plan)".into())
+                     ("(No active task context)".into(), "(No active task checklist)".into(), "(No active task plan)".into())
                 };
 
-                (request, roadmap, architecture, plan)
+                (request, tasks_checklist, roadmap, architecture, progress, plan)
             } else {
-                ("(No context)".into(), "(No context)".into(), "(No context)".into(), "(No context)".into())
+                ("(No context)".into(), "(No context)".into(), "(No context)".into(), "(No context)".into(), "(No context)".into(), "(No context)".into())
             };
 
             let projects_root = {
@@ -135,23 +138,25 @@ impl ExecutionEngine {
             };
             
             // NOTE: 'tasks_content' variable now holds the REQUEST content.
+            // 'tasks_checklist_content' holds the TASKS content.
             // 'plan_content' holds the PLAN content.
             // 'roadmap_content' holds the SPEC/ROADMAP content.
             
+            // Current Date for contextual awareness in logs
+            let current_date = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
+
             let prompt = match task_phase {
                 crate::application::state::TaskPhase::Planning => {
-                    // planning_mode_turn(cwd, roadmap, request, plan, architecture, active_task, history)
+                    // planning_mode_turn(cwd, roadmap, request, tasks_checklist, plan, architecture, active_task, history)
                     let task_path = active_task_rel_path.as_deref().unwrap_or("tasks/CURRENT");
-                    crate::strings::prompts::planning_mode_turn(&cwd_msg, &roadmap_content, &tasks_content, &plan_content, &architecture_content, task_path, &history)
+                    crate::strings::prompts::planning_mode_turn(&cwd_msg, &roadmap_content, &tasks_content, &tasks_checklist_content, &plan_content, &architecture_content, &progress_content, task_path, &history, &current_date)
                 },
                 crate::application::state::TaskPhase::Execution => {
                     let task_path = active_task_rel_path.as_deref().unwrap_or("tasks/CURRENT");
-                    crate::strings::prompts::execution_mode_turn(&cwd_msg, &roadmap_content, &tasks_content, &plan_content, &architecture_content, task_path, &history)
+                    crate::strings::prompts::execution_mode_turn(&cwd_msg, &roadmap_content, &tasks_content, &tasks_checklist_content, &plan_content, &architecture_content, &progress_content, task_path, &history, &current_date)
                 },
                 crate::application::state::TaskPhase::NewProject => {
-                    // For New Project phase, we still display the just-created files.
-                    format!("\n# Current Project Status\n## Roadmap\n{}\n\n## Request\n{}\n\n## Plan\n{}", 
-                        roadmap_content, tasks_content, plan_content)
+                    crate::strings::prompts::new_project_prompt("Project", &tasks_content, &cwd_msg, &current_date)
                 },
                 crate::application::state::TaskPhase::Conversational => {
                     crate::strings::prompts::conversational_mode_turn(&cwd_msg, &roadmap_content, &tasks_content, &plan_content, &history)
@@ -249,6 +254,7 @@ impl ExecutionEngine {
                                     let client = self.tools.lock().await;
                                     let r = client.read_file(&format!("{}/specs/roadmap.md", wd)).await.unwrap_or_else(|_| "(No roadmap.md)".into());
                                     let a = client.read_file(&format!("{}/specs/architecture.md", wd)).await.unwrap_or_else(|_| "(No architecture.md)".into());
+                                    // features removed
                                     
                                     let p = if let Some(task_rel) = &active_task_rel_path {
                                          let plan_path = format!("{}/{}/plan.md", wd, task_rel);
@@ -281,6 +287,7 @@ impl ExecutionEngine {
                                 if matches!(task_phase, crate::application::state::TaskPhase::NewProject) || is_init_task {
                                     let _ = chat.send_message(&architecture).await;
                                     let _ = chat.send_message(&roadmap).await;
+                                    // features removed
                                 }
 
                                 // Send Plan + Footer only
@@ -587,6 +594,7 @@ impl ExecutionEngine {
 
                                 let _ = chat.send_message(&architecture).await;
                                 let _ = chat.send_message(&roadmap).await;
+                                // features removed
                                 let _ = chat.send_message(&format!("{}\n", plan)).await;
                           }
 

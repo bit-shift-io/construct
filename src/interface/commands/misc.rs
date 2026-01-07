@@ -124,7 +124,7 @@ where C: ChatProvider + Clone + Send + Sync + 'static
     }
 
     // 5. Run Task (Conversational Mode Default, but allow Switching)
-    let task_prompt = args.to_string();
+    let _task_prompt = args.to_string();
     
     // 5. Run Task Loop
     let mut current_prompt = args.to_string();
