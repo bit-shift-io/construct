@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::sync::Arc;
-use tokio::sync::watch;
 use tokio::sync::Mutex;
+use tokio::sync::watch;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum TaskPhase {
@@ -96,10 +96,7 @@ pub struct RoomState {
     pub task_handle: Option<Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>>,
 }
 
-impl RoomState {
-
-
-}
+impl RoomState {}
 
 /// Persistent state of the bot, mapping Room IDs to their respective room states.
 /// Saved to `data/state.json`.

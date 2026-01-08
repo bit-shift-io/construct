@@ -3,13 +3,13 @@
 //! Handles the `.new` command.
 //! Scaffolds a new project directory (roadmap.md, tasks.md) via MCP.
 
+use crate::application::feed::{FeedManager, FeedMode};
+use crate::application::project::ProjectManager;
+use crate::application::state::{BotState, WizardMode, WizardStep};
 use crate::domain::config::AppConfig;
 use crate::domain::traits::ChatProvider;
-use crate::application::project::ProjectManager;
-use crate::application::state::{BotState, WizardStep, WizardMode};
-use anyhow::Result;
 use crate::infrastructure::tools::executor::SharedToolExecutor;
-use crate::application::feed::{FeedManager, FeedMode};
+use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -23,28 +23,28 @@ pub async fn handle_new(
 ) -> Result<()> {
     // Parse args: .new <project_name> <requirements...>
     let parts: Vec<&str> = args.splitn(2, ' ').collect();
-    
+
     // If no args (or empty string), Start Wizard
     if args.trim().is_empty() {
         // Initialize Feed
-    let feed = Arc::new(Mutex::new(FeedManager::new(
-        None, 
-        config.system.projects_dir.clone(), 
-        tools.clone(),
-        None
-    )));
-    {
+        let feed = Arc::new(Mutex::new(FeedManager::new(
+            None,
+            config.system.projects_dir.clone(),
+            tools.clone(),
+            None,
+        )));
+        {
             let mut guard = state.lock().await;
             let room_state = guard.get_room_state(&chat.room_id());
             room_state.wizard.active = true;
             room_state.wizard.mode = WizardMode::Project;
             room_state.wizard.step = Some(WizardStep::ProjectName);
             room_state.wizard.data.clear();
-            
+
             // Set Feed
             room_state.feed_manager = Some(feed.clone());
         }
-        
+
         // Initial Wizard Entry
         // Since FeedMode::Wizard renders "Current Step" for 'running' status entries,
         // we just add the first question.
@@ -54,19 +54,27 @@ pub async fn handle_new(
             f.add_prompt("Please enter a **Project Name**.".to_string());
             f.update_feed(chat).await?;
         }
-        
+
         return Ok(());
     }
-    
+
     let name = parts[0];
     let _requirements = if parts.len() > 1 { parts[1] } else { "" };
-    
+
     // Create Project
-    let parent_dir = config.system.projects_dir.clone().unwrap_or(".".to_string());
+    let parent_dir = config
+        .system
+        .projects_dir
+        .clone()
+        .unwrap_or(".".to_string());
     match project_manager.create_project(name, &parent_dir).await {
         Ok(path) => {
-            let _ = chat.send_notification(&crate::strings::messages::project_created_notification(name, &path)).await;
-            
+            let _ = chat
+                .send_notification(&crate::strings::messages::project_created_notification(
+                    name, &path,
+                ))
+                .await;
+
             // Switch context
             let mut guard = state.lock().await;
             {
@@ -79,35 +87,44 @@ pub async fn handle_new(
 
                 // Write request.md (from template + user input)
                 if !_requirements.is_empty() {
-                    let req_content = crate::strings::templates::REQUEST_TEMPLATE.replace("{{OBJECTIVE}}", _requirements);
+                    let req_content = crate::strings::templates::REQUEST_TEMPLATE
+                        .replace("{{OBJECTIVE}}", _requirements);
                     let _ = std::fs::write(task_dir.join("request.md"), req_content);
                 } else {
-                     let req_content = crate::strings::templates::REQUEST_TEMPLATE.replace("{{OBJECTIVE}}", "(No initial requirements provided)");
-                     let _ = std::fs::write(task_dir.join("request.md"), req_content);
+                    let req_content = crate::strings::templates::REQUEST_TEMPLATE
+                        .replace("{{OBJECTIVE}}", "(No initial requirements provided)");
+                    let _ = std::fs::write(task_dir.join("request.md"), req_content);
                 }
 
                 // Write plan.md (from template)
-                let _ = std::fs::write(task_dir.join("plan.md"), crate::strings::templates::PLAN_TEMPLATE);
-                
+                let _ = std::fs::write(
+                    task_dir.join("plan.md"),
+                    crate::strings::templates::PLAN_TEMPLATE,
+                );
+
                 // Set active task
                 room_state.active_task = Some("tasks/001-init".to_string());
                 // Set phase to NewProject so engine displays roadmap/architecture
                 room_state.task_phase = crate::application::state::TaskPhase::NewProject;
             } // Borrow ends
             guard.save();
-            
+
             // Optional: Confirm switch? The notification above is minimal.
             // But we already said "created at path". The user expectation is cd.
             // Maybe add a small note?
-            // chat.send_notification("Switched to project directory.").await; 
+            // chat.send_notification("Switched to project directory.").await;
             // Stick to the minimal notification for now, or append to it?
             // The notification string is: "Project 'name' created at `path`."
             // Implicitly that's where we are now.
         }
         Err(e) => {
-            let _ = chat.send_notification(&crate::strings::messages::project_creation_failed(&e.to_string())).await;
+            let _ = chat
+                .send_notification(&crate::strings::messages::project_creation_failed(
+                    &e.to_string(),
+                ))
+                .await;
         }
     }
-    
+
     Ok(())
 }

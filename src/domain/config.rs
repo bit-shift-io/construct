@@ -11,13 +11,18 @@ use std::collections::HashMap;
 /// Matches the layout of `data/config.yaml`.
 #[derive(Debug, Deserialize, Clone)]
 pub struct AppConfig {
+    /// Configuration for connected services (e.g. Matrix)
     pub services: ServicesConfig,
+    /// Configuration for AI agents
     #[serde(default)]
     pub agents: AgentsConfig,
+    /// Bridge definitions mapping services to channels
     #[serde(default)]
     pub bridges: HashMap<String, Vec<BridgeEntry>>,
+    /// Command parsing configuration
     #[allow(dead_code)]
     pub commands: CommandsConfig,
+    /// System-wide settings
     #[serde(default)]
     pub system: SystemConfig,
 }
@@ -84,8 +89,11 @@ pub struct SystemConfig {
 /// Represents a specific bridge entry connecting a service to a channel.
 #[derive(Debug, Deserialize, Clone)]
 pub struct BridgeEntry {
+    /// The service this bridge connects to (e.g. "matrix")
     pub service: Option<String>,
+    /// The specific channel/room ID
     pub channel: Option<String>,
+    /// List of agents allowed in this channel (None = all)
     pub agents: Option<Vec<String>>,
 }
 
@@ -157,4 +165,3 @@ pub struct MatrixConfig {
     #[serde(default)]
     pub display_name: Option<String>,
 }
-

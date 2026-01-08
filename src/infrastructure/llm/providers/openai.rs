@@ -78,7 +78,6 @@ struct OpenAIModelInfo {
     id: String,
 }
 
-
 /// Execute a chat request using OpenAI-compatible API
 pub async fn chat(config: ProviderConfig, context: Context) -> Result<Response, Error> {
     let base_url = config
@@ -134,14 +133,13 @@ pub async fn chat(config: ProviderConfig, context: Context) -> Result<Response, 
             .unwrap_or_else(|_| "Unable to read error response".to_string());
 
         // Try to parse error message from response
-        if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(&error_text) {
-            if let Some(error_msg) = error_json
+        if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(&error_text)
+            && let Some(error_msg) = error_json
                 .get("error")
                 .and_then(|e| e.get("message"))
                 .and_then(|m| m.as_str())
-            {
-                return Err(Error::new("openai", error_msg));
-            }
+        {
+            return Err(Error::new("openai", error_msg));
         }
 
         return Err(Error::new(
@@ -175,14 +173,12 @@ pub async fn chat(config: ProviderConfig, context: Context) -> Result<Response, 
     })
 }
 
-
-
 /// List available models from OpenAI-compatible API
 pub async fn list_models(config: ProviderConfig) -> Result<Vec<String>, Error> {
     let base_url = config
         .base_url
         .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-    
+
     let url = format!("{}/models", base_url);
 
     let response = http_client()

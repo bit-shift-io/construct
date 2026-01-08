@@ -174,15 +174,14 @@ pub async fn chat(config: ProviderConfig, context: Context) -> Result<Response, 
             .unwrap_or_else(|_| "Unable to read error response".to_string());
 
         // Try to parse error message from response
-        if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(&error_text) {
-            if let Some(error) = error_json.get("error") {
-                if let Some(error_msg) = error.get("message") {
-                    return Err(Error::new(
-                        "gemini",
-                        error_msg.as_str().unwrap_or(&error_text),
-                    ));
-                }
-            }
+        if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(&error_text)
+            && let Some(error) = error_json.get("error")
+            && let Some(error_msg) = error.get("message")
+        {
+            return Err(Error::new(
+                "gemini",
+                error_msg.as_str().unwrap_or("Unknown error"),
+            ));
         }
 
         return Err(Error::new(
@@ -222,7 +221,7 @@ pub async fn chat(config: ProviderConfig, context: Context) -> Result<Response, 
 
     Ok(Response {
         content,
-        model: model,
+        model,
         usage: TokenUsage {
             prompt_tokens: usage_metadata.prompt_token_count,
             completion_tokens: usage_metadata.candidates_token_count,

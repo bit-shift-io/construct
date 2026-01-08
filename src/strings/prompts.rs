@@ -26,9 +26,18 @@ pub fn new_project_prompt(name: &str, requirements: &str, workdir: &str, date: &
         .replace("{{ACTIVE_TASK}}", "tasks/001-init")
         .replace("{{CONTEXT}}", &context)
         .replace("{{CURRENT_DATE}}", date) // Architect template has CURRENT_DATE
-        .replace("{{TEMPLATE_PLAN}}", crate::strings::templates::PLAN_TEMPLATE)
-        .replace("{{TEMPLATE_PROGRESS}}", crate::strings::templates::PROGRESS_TEMPLATE)
-        .replace("{{TEMPLATE_WALKTHROUGH}}", crate::strings::templates::WALKTHROUGH_TEMPLATE)
+        .replace(
+            "{{TEMPLATE_PLAN}}",
+            crate::strings::templates::PLAN_TEMPLATE,
+        )
+        .replace(
+            "{{TEMPLATE_PROGRESS}}",
+            crate::strings::templates::PROGRESS_TEMPLATE,
+        )
+        .replace(
+            "{{TEMPLATE_WALKTHROUGH}}",
+            crate::strings::templates::WALKTHROUGH_TEMPLATE,
+        )
         .replace("{{TOOLS}}", TOOLS_TEMPLATE);
 
     let specific_instructions = NEW_PROJECT_TEMPLATE
@@ -37,17 +46,46 @@ pub fn new_project_prompt(name: &str, requirements: &str, workdir: &str, date: &
         .replace("{{WORKDIR}}", workdir)
         .replace("{{ACTIVE_TASK}}", "tasks/001-init")
         .replace("{{CURRENT_DATE}}", date) // Inject date into new project instructions
-        .replace("{{TEMPLATE_ROADMAP}}", crate::strings::templates::ROADMAP_TEMPLATE)
-        .replace("{{TEMPLATE_ARCHITECTURE}}", crate::strings::templates::ARCHITECTURE_TEMPLATE)
-        .replace("{{TEMPLATE_PLAN}}", crate::strings::templates::PLAN_TEMPLATE)
-        .replace("{{TEMPLATE_PROGRESS}}", crate::strings::templates::PROGRESS_TEMPLATE)
-        .replace("{{TEMPLATE_WALKTHROUGH}}", crate::strings::templates::WALKTHROUGH_TEMPLATE);
-    
+        .replace(
+            "{{TEMPLATE_ROADMAP}}",
+            crate::strings::templates::ROADMAP_TEMPLATE,
+        )
+        .replace(
+            "{{TEMPLATE_ARCHITECTURE}}",
+            crate::strings::templates::ARCHITECTURE_TEMPLATE,
+        )
+        .replace(
+            "{{TEMPLATE_PLAN}}",
+            crate::strings::templates::PLAN_TEMPLATE,
+        )
+        .replace(
+            "{{TEMPLATE_PROGRESS}}",
+            crate::strings::templates::PROGRESS_TEMPLATE,
+        )
+        .replace(
+            "{{TEMPLATE_WALKTHROUGH}}",
+            crate::strings::templates::WALKTHROUGH_TEMPLATE,
+        );
+
     // Combine them: Architect Persona + Specific Project Actions
-    format!("{}\n\n# SPECIFIC INSTRUCTIONS FOR NEW PROJECT\n{}", architect_layer, specific_instructions)
+    format!(
+        "{}\n\n# SPECIFIC INSTRUCTIONS FOR NEW PROJECT\n{}",
+        architect_layer, specific_instructions
+    )
 }
 
-pub fn planning_mode_turn(cwd: &str, roadmap: &str, request: &str, tasks_checklist: &str, plan: &str, architecture: &str, progress: &str, active_task: &str, history: &str, date: &str) -> String {
+pub fn planning_mode_turn(
+    cwd: &str,
+    roadmap: &str,
+    request: &str,
+    tasks_checklist: &str,
+    plan: &str,
+    architecture: &str,
+    progress: &str,
+    active_task: &str,
+    history: &str,
+    date: &str,
+) -> String {
     let context = CONTEXT_TEMPLATE
         .replace("{{HISTORY}}", history)
         .replace("{{PROGRESS}}", progress)
@@ -62,13 +100,37 @@ pub fn planning_mode_turn(cwd: &str, roadmap: &str, request: &str, tasks_checkli
         .replace("{{ACTIVE_TASK}}", active_task)
         .replace("{{CONTEXT}}", &context)
         .replace("{{CURRENT_DATE}}", date)
-        .replace("{{TEMPLATE_PLAN}}", crate::strings::templates::PLAN_TEMPLATE)
-        .replace("{{TEMPLATE_PROGRESS}}", crate::strings::templates::PROGRESS_TEMPLATE)
-        .replace("{{TEMPLATE_WALKTHROUGH}}", crate::strings::templates::WALKTHROUGH_TEMPLATE)
+        .replace(
+            "{{TEMPLATE_PLAN}}",
+            crate::strings::templates::PLAN_TEMPLATE,
+        )
+        .replace(
+            "{{TEMPLATE_PROGRESS}}",
+            crate::strings::templates::PROGRESS_TEMPLATE,
+        )
+        .replace(
+            "{{TEMPLATE_WALKTHROUGH}}",
+            crate::strings::templates::WALKTHROUGH_TEMPLATE,
+        )
         .replace("{{TOOLS}}", TOOLS_TEMPLATE)
 }
 
-pub fn execution_mode_turn(cwd: &str, roadmap: &str, request: &str, tasks_checklist: &str, plan: &str, architecture: &str, progress: &str, _active_task: &str, history: &str, date: &str) -> String {
+pub fn execution_mode_turn(
+    cwd: &str,
+    roadmap: &str,
+    request: &str,
+    tasks_checklist: &str,
+    plan: &str,
+    architecture: &str,
+    progress: &str,
+    _active_task: &str,
+    history: &str,
+    date: &str,
+) -> String {
+    // Context Optimization: In Execution Mode, we prioritize Tasks and Plan.
+    // Roadmap and Architecture are provided but conceptually we might want them summarized if we had a summarizer.
+    // For now, we will pass them as is but we acknowledge this is where we would optimize.
+
     let context = CONTEXT_TEMPLATE
         .replace("{{HISTORY}}", history)
         .replace("{{PROGRESS}}", progress)
@@ -104,7 +166,13 @@ pub const CONVERSATIONAL_TOOLS: &str = r#"
 - **Run Command**: NOT AVAILABLE in Conversational Mode. Switch to Planning/Execution.
 "#;
 
-pub fn conversational_mode_turn(cwd: &str, roadmap: &str, request: &str, plan: &str, history: &str) -> String {
+pub fn conversational_mode_turn(
+    cwd: &str,
+    roadmap: &str,
+    request: &str,
+    plan: &str,
+    history: &str,
+) -> String {
     CONVERSATIONAL_TEMPLATE
         .replace("{{CWD}}", cwd)
         .replace("{{HISTORY}}", history)
@@ -113,5 +181,3 @@ pub fn conversational_mode_turn(cwd: &str, roadmap: &str, request: &str, plan: &
         .replace("{{REQUEST}}", request)
         .replace("{{TOOLS}}", CONVERSATIONAL_TOOLS)
 }
-
-

@@ -1,16 +1,15 @@
 #![allow(dead_code)]
 //! Simple LLM client for multiple providers with native caching support
 
-#![allow(dead_code)]
 //! # LLM Client
 //!
 //! Provides the `Client` struct, which acts as the main entry point for LLM interactions.
 //! It routes requests to the appropriate provider based on configuration and handles response processing.
 
 use crate::domain::config::AppConfig;
+use crate::domain::traits::LlmProvider;
 use crate::infrastructure::llm::providers;
 use crate::infrastructure::llm::{Context, Error, Provider, Response};
-use crate::domain::traits::LlmProvider;
 use async_trait::async_trait;
 use tracing::{debug, warn};
 
@@ -93,9 +92,6 @@ impl Client {
         providers::chat(provider_type, provider_config, context).await
     }
 
-
-
-
     /// List available models for an agent.
     /// Returns a vector of tuples: `(model_id, display_name)`.
     pub async fn list_models(&self, agent_name: &str) -> Result<Vec<(String, String)>, Error> {
@@ -116,31 +112,41 @@ impl Client {
         let raw_models = match providers::list_models(provider_type, provider_config).await {
             Ok(models) => models,
             Err(e) => {
-                warn!("Failed to list models for '{}': {}. Attempting fallback.", agent_name, e);
-                
+                warn!(
+                    "Failed to list models for '{}': {}. Attempting fallback.",
+                    agent_name, e
+                );
+
                 // 1. Check explicit fallbacks in AgentConfig
                 if let Some(fallbacks) = &agent_config.model_fallbacks {
                     if !fallbacks.is_empty() {
-                         debug!("Using configured fallback models for agent '{}'", agent_name);
-                         fallbacks.clone()
+                        debug!(
+                            "Using configured fallback models for agent '{}'",
+                            agent_name
+                        );
+                        fallbacks.clone()
                     } else {
                         // 2. Check provider default fallbacks
-                         debug!("Using provider default models for '{}' ({:?})", agent_name, provider_type);
-                         providers::get_default_models(provider_type)
+                        debug!(
+                            "Using provider default models for '{}' ({:?})",
+                            agent_name, provider_type
+                        );
+                        providers::get_default_models(provider_type)
                     }
                 } else {
-                     // 2. Check provider default fallbacks
-                     debug!("Using provider default models for '{}' ({:?})", agent_name, provider_type);
-                     providers::get_default_models(provider_type)
+                    // 2. Check provider default fallbacks
+                    debug!(
+                        "Using provider default models for '{}' ({:?})",
+                        agent_name, provider_type
+                    );
+                    providers::get_default_models(provider_type)
                 }
             }
         };
-        
+
         // Return as (id, display_name) tuples (identical since mapping is removed)
-        let mapped_models: Vec<(String, String)> = raw_models
-            .into_iter()
-            .map(|id| (id.clone(), id))
-            .collect();
+        let mapped_models: Vec<(String, String)> =
+            raw_models.into_iter().map(|id| (id.clone(), id)).collect();
 
         Ok(mapped_models)
     }

@@ -26,7 +26,7 @@ impl ProjectManager {
         // Create project directory
         std::fs::create_dir_all(&project_path)
             .map_err(|e| anyhow::anyhow!("Failed to create project dir: {}", e))?;
-        
+
         // Create specs directory
         std::fs::create_dir_all(project_path.join("specs"))
             .map_err(|e| anyhow::anyhow!("Failed to create specs dir: {}", e))?;
@@ -44,6 +44,9 @@ impl ProjectManager {
     pub async fn is_valid_project(&self, path: &str) -> bool {
         let client = self.tools.lock().await;
         // Check for roadmap.md existence using read_file as a proxy.
-        client.read_file(&format!("{}/specs/roadmap.md", path)).await.is_ok()
+        client
+            .read_file(&format!("{}/specs/roadmap.md", path))
+            .await
+            .is_ok()
     }
 }

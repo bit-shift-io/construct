@@ -11,6 +11,14 @@ The following structure exists:
 - `{{ACTIVE_TASK}}/` (request.md, plan.md)
 
 REQUIRED ACTIONS (Execute in order):
+
+0. **Analyze Requirements**: 
+   - Review `{{REQUIREMENTS}}`.
+   - **CRITICAL**: If the request is Vuaue (e.g. "make a website", "build an app"), you MUST **STOP** and ask the user for clarification.
+   - Output your questions clearly.
+   - Do NOT proceed to Step 1 until you have a granular understanding of the goal (e.g. "Rust CLI for system monitoring using sysinfo").
+   - If requirements are clear, proceed immediately to Step 1.
+
 1. Create `specs/roadmap.md` by POPULATING the following template with high-level project milestones:
 ```markdown
 {{TEMPLATE_ROADMAP}}

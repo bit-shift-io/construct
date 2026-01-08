@@ -105,7 +105,6 @@ struct AnthropicModelInfo {
     id: String,
 }
 
-
 /// Execute a chat request using Anthropic's API
 pub async fn chat(config: ProviderConfig, context: Context) -> Result<Response, Error> {
     let base_url = config
@@ -179,23 +178,77 @@ pub async fn chat(config: ProviderConfig, context: Context) -> Result<Response, 
         stop_sequences: vec![],
     };
 
-    // Make HTTP request
-    let mut request_builder = http_client()
-        .post(&url)
-        .header("x-api-key", config.api_key)
-        .header("anthropic-version", api_version)
-        .header("Content-Type", "application/json")
-        .json(&request);
+    // Make HTTP request with retry logic
+    let mut last_error = Error::new("anthropic", "Unknown error");
+    
+    for attempt in 0..3 {
+        // Clone request builder for each attempt since send consumes it
+        let mut request_builder = http_client()
+            .post(&url)
+            .header("x-api-key", config.api_key.clone())
+            .header("anthropic-version", api_version)
+            .header("Content-Type", "application/json")
+            .json(&request);
 
-    if let Some(timeout_secs) = config.timeout {
-        request_builder = request_builder.timeout(std::time::Duration::from_secs(timeout_secs));
+        if let Some(timeout_secs) = config.timeout {
+            request_builder = request_builder.timeout(std::time::Duration::from_secs(timeout_secs));
+        }
+
+        match request_builder.send().await {
+            Ok(resp) => {
+                 let status = resp.status();
+                 if status.is_success() || status.is_client_error() {
+                     // Don't retry client errors (4xx) unless it's a timeout/rate limit?
+                     // Verify status inside the response handling below.
+                     // Actually, we should process it. If it fails inside, we might want to retry 5xx.
+                     // For now, let's return the response and let the status check handle it.
+                     // But wait, the original code checks status AFTER this block.
+                     // We need to move the response processing inside or return it.
+                     // Let's break the loop with the response.
+                     let response = resp;
+                     
+                     // If server error (5xx), maybe retry?
+                     if status.is_server_error() {
+                         let error_text = response.text().await.unwrap_or_default();
+                         last_error = Error::new("anthropic", format!("HTTP {}: {}", status, error_text));
+                         tracing::warn!("Anthropic API error (attempt {}): {}", attempt + 1, last_error.message);
+                         tokio::time::sleep(std::time::Duration::from_millis(500 * (attempt + 1) as u64)).await;
+                         continue;
+                     }
+                     
+                     // Success or Client Error -> Process it
+                     // We need to return the response to the outer scope to preserve original flow structure 
+                     // OR handle it here.
+                     // Refactoring strictly to wrapping the *send* might be cleaner if we just return the Result<Response>.
+                     
+                     // Let's refactor slightly to return the response from the block.
+                     // But we can't easily jump out of the loop with a value to a variable defined outside without specific structure.
+                     // Let's use a labeled block or just match properly.
+                
+                     // Check status here to decide on retry
+                     // Original code checks !status.is_success() later.
+                     // We only want to retry on NETWORK errors or 5xx.
+                     // 4xx should NOT be retried (except 429).
+                     
+                     return process_response(response).await;
+                 }
+            }
+            Err(e) => {
+                last_error = Error::new("anthropic", format!("HTTP request failed: {}", e));
+                tracing::warn!("Anthropic network error (attempt {}): {}", attempt + 1, e);
+            }
+        }
+        
+        // Exponential backoff
+        tokio::time::sleep(std::time::Duration::from_millis(500 * (attempt + 1) as u64)).await;
     }
+    
+    return Err(last_error);
+    
+} // End of chat function wrapper? No, this replaces the request_builder block.
 
-    let response = request_builder
-        .send()
-        .await
-        .map_err(|e| Error::new("anthropic", format!("HTTP request failed: {}", e)))?;
-
+// Helper to process response to avoid deep nesting
+async fn process_response(response: reqwest::Response) -> Result<Response, Error> {
     let status = response.status();
 
     if !status.is_success() {
@@ -205,17 +258,15 @@ pub async fn chat(config: ProviderConfig, context: Context) -> Result<Response, 
             .unwrap_or_else(|_| "Unable to read error response".to_string());
 
         // Try to parse error message from response
-        if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(&error_text) {
-            if let Some(error) = error_json.get("error") {
-                if let Some(error_type) = error.get("type") {
-                    if let Some(error_msg) = error.get("message") {
-                        return Err(Error::new(
-                            "anthropic",
-                            format!("{}: {}", error_type, error_msg),
-                        ));
-                    }
-                }
-            }
+        if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(&error_text)
+            && let Some(error) = error_json.get("error")
+            && let Some(error_type) = error.get("type")
+            && let Some(error_msg) = error.get("message")
+        {
+            return Err(Error::new(
+                "anthropic",
+                format!("{}: {}", error_type, error_msg),
+            ));
         }
 
         return Err(Error::new(
@@ -268,7 +319,7 @@ pub async fn list_models(config: ProviderConfig) -> Result<Vec<String>, Error> {
     let base_url = config
         .base_url
         .unwrap_or_else(|| "https://api.anthropic.com".to_string());
-    
+
     let url = format!("{}/v1/models", base_url);
     let api_version = "2023-06-01";
 
@@ -281,7 +332,10 @@ pub async fn list_models(config: ProviderConfig) -> Result<Vec<String>, Error> {
         .map_err(|e| Error::new("anthropic", format!("HTTP request failed: {}", e)))?;
 
     if !response.status().is_success() {
-        return Err(Error::new("anthropic", format!("HTTP {}", response.status())));
+        return Err(Error::new(
+            "anthropic",
+            format!("HTTP {}", response.status()),
+        ));
     }
 
     let model_list: AnthropicModelList = response

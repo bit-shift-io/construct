@@ -8,11 +8,11 @@ use crate::domain::traits::ChatProvider;
 use anyhow::Result;
 use async_trait::async_trait;
 use matrix_sdk::room::Room;
+use matrix_sdk::ruma::EventId;
 use matrix_sdk::ruma::events::relation::Replacement;
 use matrix_sdk::ruma::events::room::message::{
     Relation, RoomMessageEventContent, RoomMessageEventContentWithoutRelation,
 };
-use matrix_sdk::ruma::EventId;
 use std::convert::TryFrom;
 
 #[derive(Clone)]
@@ -74,6 +74,9 @@ impl ChatProvider for MatrixService {
     }
 
     async fn get_latest_event_id(&self) -> Result<Option<String>, String> {
-        Ok(self.room.latest_event().map(|e| e.event_id().expect("Event ID missing").to_string()))
+        Ok(self
+            .room
+            .latest_event()
+            .map(|e| e.event_id().expect("Event ID missing").to_string()))
     }
 }

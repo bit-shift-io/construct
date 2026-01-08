@@ -1,9 +1,9 @@
+use crate::application::state::BotState;
 use crate::domain::config::AppConfig;
-use crate::application::state::{BotState};
 use crate::domain::traits::ChatProvider;
-use tokio::sync::Mutex;
-use std::sync::Arc;
 use crate::interface::commands::wizard;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub async fn handle_agent<C>(
     config: &AppConfig,

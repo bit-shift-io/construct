@@ -3,6 +3,6 @@
 //! Handles interactions with external systems and services.
 //! Implements the traits defined in the Domain layer (e.g., ChatProvider, LlmProvider).
 
-pub mod matrix;
 pub mod llm;
+pub mod matrix;
 pub mod tools;

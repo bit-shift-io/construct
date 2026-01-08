@@ -45,6 +45,4 @@ mod types;
 
 pub use client::Client;
 
-pub use types::{
-    Context, Error, Message, MessageRole, Provider, Response, TokenUsage,
-};
+pub use types::{Context, Error, Message, MessageRole, Provider, Response, TokenUsage};

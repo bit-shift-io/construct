@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-#![allow(dead_code)]
+
 //! # Logging Service
 //!
 //! A centralized logging service that can dispatch log messages to multiple sinks (Console, File, Chat).
@@ -9,7 +9,7 @@ use crate::domain::traits::ChatProvider;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::Arc;
-use tracing::{info, error, warn, debug, Level};
+use tracing::{Level, debug, error, info, warn};
 
 /// Different destinations for logs
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,10 +78,10 @@ impl<CP: ChatProvider + ?Sized> LoggingService<CP> {
         }
 
         // 2. File
-        if let Some(path) = &self.file_path {
-            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
-                let _ = writeln!(file, "{}", formatted);
-            }
+        if let Some(path) = &self.file_path
+            && let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path)
+        {
+            let _ = writeln!(file, "{}", formatted);
         }
 
         // 3. Chat (Async, fire-and-forget style for now, ideally queued)
@@ -92,7 +92,9 @@ impl<CP: ChatProvider + ?Sized> LoggingService<CP> {
             // Let's assume we log everything if the sink is enabled, but practically
             // we might want a filter. For now, we log everything if sink is present.
             // But we should format it as a code block for readability.
-            let _ = chat.send_notification(&format!("`[LOG]` {}", message)).await;
+            let _ = chat
+                .send_notification(&format!("`[LOG]` {}", message))
+                .await;
         }
     }
 }

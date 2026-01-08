@@ -6,7 +6,6 @@
 // New Strings
 pub const AUTH_DENIED: &str = "🚫 **Authorization Denied**.";
 pub const UNKNOWN_COMMAND: &str = "❓ Unknown command.";
-pub const TASK_COMPLETE: &str = "✅ **Task Complete**.";
 
 pub fn task_failed(err: &str) -> String {
     format!("❌ **Task Failed**: {err}")
@@ -21,7 +20,7 @@ pub fn project_creation_failed(err: &str) -> String {
 }
 
 pub fn directory_changed_msg(path: &str) -> String {
-     format!("Changed directory to `{path}`")
+    format!("Changed directory to `{path}`")
 }
 
 pub fn invalid_directory(err: &str) -> String {
@@ -35,7 +34,6 @@ pub fn command_output_format(workdir: &str, command: &str, output: &str) -> Stri
 pub fn command_failed(err: &str) -> String {
     format!("Command Failed: {err}")
 }
-
 
 pub const READ_USAGE: &str = "Usage: `.read <file_path>`";
 pub const ASK_USAGE: &str = "Usage: `.ask <message>`";
@@ -53,7 +51,8 @@ pub fn project_listing_not_implemented(path: &str) -> String {
     format!("Project listing for `{path}` not yet implemented in PM.")
 }
 
-pub const NOT_IN_PROJECT: &str = "⚠️ You are not inside a project. Use `.new` or `.open` (cd) first.";
+pub const NOT_IN_PROJECT: &str =
+    "⚠️ You are not inside a project. Use `.new` or `.open` (cd) first.";
 
 pub fn file_read_success(path: &str, content: &str) -> String {
     format!("**File: {path}**\n\n```\n{content}\n```")
@@ -63,17 +62,11 @@ pub fn file_read_failed(err: &str) -> String {
     format!("Failed to read file: {err}")
 }
 
-pub fn room_status_msg(
-    project: &str,
-    cwd: &str,
-    model: &str,
-    agent: &str
-) -> String {
+pub fn room_status_msg(project: &str, cwd: &str, model: &str, agent: &str) -> String {
     format!(
         "**Project**: `{project}`\n**CWD**: `{cwd}`\n**Model**: `{model}`\n**Agent**: `{agent}`"
     )
 }
-
 
 pub const WIZARD_CANCELLED: &str = "❌ Wizard cancelled.";
 // Note: We might want a dynamic one for wizard success to show path, but let's stick to what we see in the code or make it dynamic.
