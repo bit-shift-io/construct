@@ -43,6 +43,11 @@ pub async fn start_task_wizard(
         tools.clone(),
         feed_id,
     )));
+    
+    {
+        let mut f = feed.lock().await;
+        f.set_title("🧙 New Task Wizard".to_string());
+    }
 
     {
         let mut guard = state.lock().await;

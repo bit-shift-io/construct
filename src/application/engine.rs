@@ -259,7 +259,7 @@ impl ExecutionEngine {
             );
 
             // DEBUG: Log the full prompt to verify formatting
-            tracing::debug!("DEBUG COMPOSITE PROMPT:\n{}", full_prompt);
+            tracing::info!("DEBUG COMPOSITE PROMPT:\n{}", full_prompt);
 
             // 2. LLM Completion
             let _ = chat.typing(true).await;
@@ -274,7 +274,7 @@ impl ExecutionEngine {
                         duration.as_millis(),
                         full_prompt.len()
                     );
-                    tracing::debug!("DEBUG RAW LLM RESPONSE:\n{}", r);
+                    tracing::info!("DEBUG RAW LLM RESPONSE:\n{}", r);
                     r
                 }
                 Err(e) => {
@@ -409,7 +409,7 @@ impl ExecutionEngine {
                                     // But squashing usually hides the recent activity log?
                                     // Let's check format_squashed. If it hides logs, we might just leave it Active?
                                     // Or implement a "Planning Complete" log.
-                                    feed.add_activity("Planning Complete".to_string());
+                                    feed.add_activity("✅ Planning Complete".to_string());
                                     let _ = feed.update_feed(chat).await;
                                 }
 
@@ -464,8 +464,13 @@ impl ExecutionEngine {
 
                                     let final_msg = clean_msg.replace("NO_MORE_STEPS", "").trim().to_string();
                                     
-                                    if !final_msg.is_empty() {
-                                        feed.add_completion_message(final_msg);
+                                    // Only add completion text if we are in Conversational mode, OR if it's a very short specific message.
+                                    // For Execution, the "Thinking" block usually covers the intent, and the actions show the result.
+                                    // The extra text is often just "I have done X, Y, Z" which is redundant.
+                                    if matches!(task_phase, crate::application::state::TaskPhase::Conversational) {
+                                         if !final_msg.is_empty() {
+                                            feed.add_completion_message(final_msg);
+                                        }
                                     }
 
                                     feed.process_action(&crate::domain::types::AgentAction::Done)

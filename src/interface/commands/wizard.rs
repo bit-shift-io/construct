@@ -422,6 +422,10 @@ pub async fn start_agent_wizard(
         room.wizard.mode = WizardMode::AgentConfig;
         room.wizard.step = Some(WizardStep::AgentSelection);
         room.wizard.data.clear();
+        if let Some(feed) = &room.feed_manager {
+             let mut f = feed.lock().await;
+             f.set_title("🤖 Agent Configuration".to_string());
+        }
         room.feed_manager.clone()
     };
 

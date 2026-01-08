@@ -33,6 +33,11 @@ pub async fn handle_new(
             tools.clone(),
             None,
         )));
+        
+        {
+            let mut f = feed.lock().await;
+            f.set_title("🧙 New Project Wizard".to_string());
+        }
         {
             let mut guard = state.lock().await;
             let room_state = guard.get_room_state(&chat.room_id());

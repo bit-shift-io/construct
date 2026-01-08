@@ -5,6 +5,7 @@
 
 pub mod engine;
 pub mod feed;
+pub mod feed_formatter;
 pub mod logging;
 pub mod parsing;
 pub mod project;
