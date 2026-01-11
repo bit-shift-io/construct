@@ -5,7 +5,12 @@ pub struct FeedFormatter;
 
 impl FeedFormatter {
     pub fn format_active(manager: &FeedManager) -> String {
-        let mut content = String::from("**🚀 Thinking & doing...**\n");
+        let header = if let Some(agent) = &manager.agent_name {
+            format!("**🚀 [{}] Thinking & doing...**\n", agent)
+        } else {
+             String::from("**🚀 Thinking & doing...**\n")
+        };
+        let mut content = header;
         if let Some(task) = &manager.current_task {
             // Only show first line, no label
             let summary = task.lines().next().unwrap_or(task);
@@ -25,9 +30,41 @@ impl FeedFormatter {
             }
         }
         
-        // Always show the last thought if present
+        // Always show the last thought if present, limited to 3 lines
         if let Some(thought) = &manager.last_agent_thought {
-             content.push_str(&format!("\n> {}\n", thought.replace('\n', "\n> ")));
+             // Clean up the thought BEFORE truncating
+             let clean_lines: Vec<String> = thought.lines()
+                .map(|l| strip_markdown(l.trim())) // Strip MD from each line first
+                .filter(|l| !l.is_empty()) // Remove empty
+                .filter(|l| {
+                    // Remove header-only lines typical of ReAct prompts
+                    let t = l.to_uppercase();
+                    t != "EXECUTE:" && t != "VERIFY:" && t != "UPDATE:" && t != "REASON:" && !t.starts_with("STEP ")
+                })
+                .collect();
+             
+             if !clean_lines.is_empty() {
+                 // Flatten to single paragraph
+                 let full_text = clean_lines.join(" ");
+                 
+                 // Truncate to approx 3 lines (300 chars)
+                 let limit = 300;
+                 if full_text.len() > limit {
+                     // Try to cut at space
+                     let cut_idx = full_text.char_indices()
+                        .take(limit)
+                        .last()
+                        .map(|(i, _)| i)
+                        .unwrap_or(limit);
+                        
+                     // Find last space before limit to avoid split word
+                     let safe_cut = full_text[..cut_idx].rfind(' ').unwrap_or(cut_idx);
+                     
+                     content.push_str(&format!("\n> {}\n> ...\n", &full_text[..safe_cut]));
+                 } else {
+                     content.push_str(&format!("\n> {}\n", full_text));
+                 }
+             }
         }
 
         content
@@ -69,8 +106,38 @@ impl FeedFormatter {
         }
 
         if let Some(msg) = &manager.completion_message {
-            content.push_str(&format!("\n{}\n", msg));
+            // Apply similar sanitization to completion message to prevent huge dumps
+            let clean_msg = strip_markdown(msg.trim());
+            let flattened = clean_msg.replace('\n', " ");
+            
+            // Truncate if excessively long (e.g. > 500 chars), though completion msgs are usually shorter
+            let limit = 500;
+            if flattened.len() > limit {
+                 let cut_idx = flattened.char_indices()
+                    .take(limit)
+                    .last()
+                    .map(|(i, _)| i)
+                    .unwrap_or(limit);
+                 content.push_str(&format!("\n> {}...\n", &flattened[..cut_idx]));
+            } else {
+                 content.push_str(&format!("\n> {}\n", flattened));
+            }
         }
+
+        let hint = if let Some(ts) = manager.auto_start_timestamp {
+             let now = Local::now().timestamp();
+             let remaining = ts - now;
+             if remaining > 0 {
+                 let mins = (remaining + 59) / 60; // Ceiling
+                 format!("**Next Steps**: Type `.start` (auto-starts in **{}m**) to begin the next milestone, or `.task` to create a custom task.", mins)
+             } else {
+                 "**Next Steps**: Type `.start` to begin the next milestone, or `.task` to create a custom task.".to_string()
+             }
+        } else {
+             "**Next Steps**: Type `.start` to begin the next milestone, or `.task` to create a custom task.".to_string()
+        };
+
+        content.push_str(&format!("\n\n{}", hint));
 
         content
     }
@@ -153,4 +220,17 @@ impl FeedFormatter {
         content.push_str("✅ **Plan Generated**: Type `.start` to proceed or `.ask` to refine.");
         content
     }
+}
+
+fn strip_markdown(text: &str) -> String {
+    // Basic stripping of common markdown symbols
+    let cleaned = text.replace("**", "")
+        .replace("__", "")
+        .replace("##", "") // Headers
+        .replace("#", "")
+        .replace("`", "")
+        .replace(">", ""); // Blockquotes
+    
+    // Also strip generic "Output:" prefixes often found in LLM thoughts
+    cleaned.trim_start_matches("Output:").trim().to_string()
 }

@@ -18,7 +18,7 @@ pub enum TaskPhase {
     Planning,
     Execution,
     NewProject,
-    Conversational,
+    Assistant,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -94,6 +94,8 @@ pub struct RoomState {
     pub pending_approval_tx: Option<Arc<Mutex<Option<tokio::sync::oneshot::Sender<bool>>>>>,
     #[serde(skip)]
     pub task_handle: Option<Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>>,
+    #[serde(default)]
+    pub task_completion_time: Option<i64>,
 }
 
 impl RoomState {}

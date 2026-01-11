@@ -11,7 +11,11 @@ use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+
+use crate::domain::config::AppConfig;
+
 pub async fn handle_start<C>(
+    config: &AppConfig,
     state: &Arc<Mutex<BotState>>,
     engine: &ExecutionEngine,
     chat: &C,
@@ -24,17 +28,6 @@ where
     let (active_task, agent_name, phase) = {
         let mut guard = state.lock().await;
         let room = guard.get_room_state(&chat.room_id());
-
-        // If task is already completed or not active?
-        // We assume valid context if we are "paused".
-        // But what if there is no task?
-        if room.task_phase != TaskPhase::Planning {
-            // If already in Execution, tell them it's running? Or do nothing?
-            // If in Execution and loop is dead (e.g. crashed?), we might want to restart?
-            // For now, assume it's only valid if in Planning.
-            // UNLESS the user stopped it manually and wants to resume?
-            // My plan said: "If task_phase is Planning, switch to Execution."
-        }
 
         (
             room.active_task.clone(),
@@ -52,9 +45,10 @@ where
             room.stop_requested = false; // Ensure cleared
         }
 
-        let _ = chat
-            .send_notification("🚀 **Starting Execution Phase**")
-            .await;
+        // Notification removed as per user request
+        // let _ = chat
+        //     .send_notification("🚀 **Starting Execution Phase**")
+        //     .await;
 
         // Resume Engine
         // Convert options to strings safely
@@ -98,9 +92,46 @@ where
             room.task_handle = Some(Arc::new(Mutex::new(Some(handle))));
         }
     } else {
-        let _ = chat
-            .send_notification("ℹ️ Task is already valid or not in Planning/NewProject phase.")
-            .await;
+        // Smart Start Logic: Look for next milestone
+        if let Some(wd) = workdir {
+             let roadmap_path = std::path::Path::new(&wd).join("specs/roadmap.md");
+             if roadmap_path.exists() {
+                 let content = std::fs::read_to_string(&roadmap_path).unwrap_or_default();
+                 let mut next_task = None;
+                 
+                 for line in content.lines() {
+                     let trimmed = line.trim();
+                     if trimmed.starts_with("- [ ]") {
+                         // Found unchecked task
+                         // Extract text
+                         next_task = Some(trimmed[5..].trim().to_string());
+                         break;
+                     }
+                 }
+
+                 if let Some(task_desc) = next_task {
+                     // Notification removed as per user request e.g. "🚀 **Found Next Milestone**: ..."
+                     
+                     // Trigger new task
+                     crate::interface::commands::task::handle_task(
+                         config,
+                         state,
+                         engine,
+                         chat,
+                         &task_desc,
+                         None,
+                         Some(wd),
+                         true // Create new folder
+                     ).await?;
+                 } else {
+                     let _ = chat.send_notification("ℹ️ No pending milestones found in roadmap.md. Use `.task` to create a custom task.").await;
+                 }
+             } else {
+                 let _ = chat.send_notification("ℹ️ No roadmap.md found. Use `.task` to create a custom task.").await;
+             }
+        } else {
+             let _ = chat.send_notification("⚠️ You are not in a valid project directory.").await;
+        }
     }
 
     Ok(())

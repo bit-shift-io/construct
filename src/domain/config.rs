@@ -84,6 +84,8 @@ pub struct SystemConfig {
     pub admin: Vec<String>,
     #[serde(default)]
     pub allowed_directories: Vec<String>,
+    #[serde(default)]
+    pub auto_start_delay_minutes: Option<u64>,
 }
 
 /// Represents a specific bridge entry connecting a service to a channel.

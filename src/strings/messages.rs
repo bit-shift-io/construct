@@ -64,7 +64,7 @@ pub fn file_read_failed(err: &str) -> String {
 
 pub fn room_status_msg(project: &str, cwd: &str, model: &str, agent: &str) -> String {
     format!(
-        "**Project**: `{project}`\n**CWD**: `{cwd}`\n**Model**: `{model}`\n**Agent**: `{agent}`"
+        "**Project**: {project}\n**CWD**: {cwd}\n**Model**: {model}\n**Agent**: {agent}"
     )
 }
 

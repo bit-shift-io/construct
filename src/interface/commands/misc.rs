@@ -155,7 +155,7 @@ where
         // User expects .ask to start fresh conversation or continue?
         // Usually .ask implies conversational entry.
         let room = guard.get_room_state(&chat.room_id());
-        room.task_phase = crate::application::state::TaskPhase::Conversational;
+        room.task_phase = crate::application::state::TaskPhase::Assistant;
     }
 
     loop {
@@ -209,7 +209,7 @@ where
             // If SwitchMode happened, engine.rs sets phase.
             // If we are in Planning/Execution, we should probably auto-continue with "Perform Next Step".
 
-            if current_phase != crate::application::state::TaskPhase::Conversational {
+            if current_phase != crate::application::state::TaskPhase::Assistant {
                 // Auto-continue!
                 // What is the prompt?
                 // If we just switched, the prompt should probably be "Continue" or empty?
@@ -219,7 +219,7 @@ where
                 // Check if we switched to a non-Conversational phase
                 if matches!(
                     current_phase,
-                    crate::application::state::TaskPhase::Conversational
+                    crate::application::state::TaskPhase::Assistant
                 ) {
                     // No mode switch happened, so we are purely done with this turn.
                     break;

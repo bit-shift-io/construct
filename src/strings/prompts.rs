@@ -147,9 +147,9 @@ pub fn execution_mode_turn(
         .replace("{{TOOLS}}", TOOLS_TEMPLATE)
 }
 
-pub const CONVERSATIONAL_TEMPLATE: &str = include_str!("../../prompts/conversational.md");
+pub const ASSISTANT_TEMPLATE: &str = include_str!("../../prompts/assistant.md");
 pub const TOOLS_TEMPLATE: &str = include_str!("../../prompts/tools.md");
-pub const CONVERSATIONAL_TOOLS: &str = r#"
+pub const ASSISTANT_TOOLS: &str = r#"
 # AVAILABLE TOOLS
 1. **Switch Mode**:
 ```switch_mode planning``` (Use this when the user asks for a change or feature)
@@ -161,23 +161,29 @@ pub const CONVERSATIONAL_TOOLS: &str = r#"
 3. **Read File**:
 ```read path/to/file```
 
-# LOCKED TOOLS
-- **Write File**: NOT AVAILABLE in Conversational Mode. Switch to Planning/Execution.
-- **Run Command**: NOT AVAILABLE in Conversational Mode. Switch to Planning/Execution.
 "#;
 
-pub fn conversational_mode_turn(
+pub fn assistant_mode_turn(
     cwd: &str,
     roadmap: &str,
-    request: &str,
+    tasks_checklist: &str,
     plan: &str,
+    architecture: &str,
+    progress: &str,
     history: &str,
+    request: &str,
 ) -> String {
-    CONVERSATIONAL_TEMPLATE
-        .replace("{{CWD}}", cwd)
+    let context = CONTEXT_TEMPLATE
         .replace("{{HISTORY}}", history)
+        .replace("{{PROGRESS}}", progress)
         .replace("{{ROADMAP}}", roadmap)
-        .replace("{{PLAN}}", plan)
+        .replace("{{ARCHITECTURE}}", architecture)
         .replace("{{REQUEST}}", request)
-        .replace("{{TOOLS}}", CONVERSATIONAL_TOOLS)
+        .replace("{{TASKS_CHECKLIST}}", tasks_checklist)
+        .replace("{{PLAN}}", plan);
+
+    ASSISTANT_TEMPLATE
+        .replace("{{CWD}}", cwd)
+        .replace("{{CONTEXT}}", &context)
+        .replace("{{TOOLS}}", ASSISTANT_TOOLS)
 }

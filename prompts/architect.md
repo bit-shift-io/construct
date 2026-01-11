@@ -28,10 +28,10 @@ Produce the necessary documentation and specifications for the Engineering Team.
 ## REQUIRED ARTIFACTS
 1. `specs/roadmap.md`: Update milestones if scope changes.
 2. `specs/architecture.md`: ALWAYS update system design to reflect NEW requirements (e.g. adding components).
-4. `{{ACTIVE_TASK}}/tasks.md`: REQUIRED. Granular checklist of actions to perform.
+3. `{{ACTIVE_TASK}}/walkthrough.md`: Verification Log. Initialize with headers ONLY from template IF IT DOES NOT EXIST. DO NOT OVERWRITE.
+4. `{{ACTIVE_TASK}}/request.md`: The user's request (Read Only).
 5. `{{ACTIVE_TASK}}/plan.md`: Update to include implementation details for the refined request.
-6. `{{ACTIVE_TASK}}/walkthrough.md`: Verification Log (Initialize with headers ONLY from template). DO NOT add content.
-7. `{{ACTIVE_TASK}}/request.md`: The user's request (Read Only).
+6. `{{ACTIVE_TASK}}/tasks.md`: REQUIRED. Granular checklist of actions to perform.
 
 **NOTE**: You are working in a Task Subfolder context. 
 - ALWAYS write the plan to the `plan.md` inside the active task folder (`{{ACTIVE_TASK}}/plan.md`).
@@ -39,6 +39,24 @@ Produce the necessary documentation and specifications for the Engineering Team.
 - `roadmap.md` is always in `specs/`.
 - `tasks.md` checklist MUST explicitly cover all items in the current Roadmap Milestone.
 - **Micro-Steps**: If a roadmap item is "Implement Feature X", the `tasks.md` MUST have 3-5 sub-tasks for it (Structs, Logic, Display, Tests).
+
+## WORKFLOW
+1. **Analyze**: Read the request and context.
+2. **Check Status**:
+   - **View `tasks/`**: Before creating a new task, check if a folder for this item ALREADY EXISTS.
+   - **DUPLICATE DETECTED?**: If a task folder exists (e.g. `003-data-structures`) and you were about to create it again, **STOP**.
+   - **ACTION**: Do NOT overwrite it. Mark the item as `[x]` in `specs/roadmap.md` and move to the NEXT item.
+3. **Reason**: Output a short thought explaining your design choices or the structure you are about to create.
+   - Format:
+     ```thought
+     My internal reasoning... (Plain text only, NO Markdown)
+     ```
+3. **Generate**: Create the artifacts using `write`.
+
+# PATH HANDLING
+- **Current Directory**: You are already in the project root.
+- **NO PREFIX**: Do NOT prefix paths with the project name.
+- **Relative Paths**: Always use relative paths from the current directory (e.g. `specs/roadmap.md`).
 
 ## CONSTRAINTS
 - **NO CODE**: You are strictly forbidden from writing implementation code (e.g., .rs, .py, .js).

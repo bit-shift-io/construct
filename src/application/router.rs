@@ -45,6 +45,25 @@ impl CommandRouter {
     where
         C: ChatProvider + Clone + Send + Sync + 'static,
     {
+        // Cancel Auto-Continue Timer on ANY user message (unless it's the bot itself, handled by caller check usually)
+        if sender != chat.room_id() { // Simple check, though main.rs already checks sender != own_user_id
+             let mut guard = self.state.lock().await;
+             if let Some(room) = guard.rooms.get_mut(&chat.room_id()) {
+                 if room.task_completion_time.is_some() {
+                     room.task_completion_time = None;
+                     // access feed via room
+                     if let Some(feed_mutex) = &room.feed_manager {
+                         let mut feed = feed_mutex.lock().await;
+                         feed.auto_start_timestamp = None;
+                         // Force update to remove countdown? Or wait for next sticky?
+                         // Ideally we force update if it was currently displaying the countdown.
+                         // But router doesn't easily async update feed here without holding locks too long.
+                         // We'll let the interaction trigger the next update naturally or rely on the fact the user is typing.
+                     }
+                 }
+             }
+        }
+
         let msg = message.trim();
 
         // Debug Log (Moved to top)
@@ -323,7 +342,7 @@ impl CommandRouter {
                         );
 
                         // Use handle_start for Execution Phase
-                        commands::start::handle_start(&self.state, &engine, chat, Some(wd.clone()))
+                        commands::start::handle_start(&self.config, &self.state, &engine, chat, Some(wd.clone()))
                             .await?;
                     } else {
                         let _ = chat
@@ -496,7 +515,8 @@ impl CommandRouter {
                     self.state.clone(),
                 );
 
-                commands::start::handle_start(&self.state, &engine, chat, workdir).await?;
+                // Use handle_start for Execution Phase
+                commands::start::handle_start(&self.config, &self.state, &engine, chat, workdir).await?;
             }
             ".stop" => {
                 let mut guard = self.state.lock().await;

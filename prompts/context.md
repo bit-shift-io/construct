@@ -11,8 +11,7 @@
 ## Architecture
 {{ARCHITECTURE}}
 
-## Features
-{{FEATURES}}
+
 
 ## User Request
 {{REQUEST}}

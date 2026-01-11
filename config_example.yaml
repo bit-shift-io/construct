@@ -24,6 +24,9 @@ system:
   admin:
     - "@admin:matrix.org"
 
+  # Auto-start delay for next milestone in minutes (default: 30)
+  auto_start_delay_minutes: 30
+
 # ----------------------------------------------------------------------------
 # AI Agent Configuration
 # ----------------------------------------------------------------------------

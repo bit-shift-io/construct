@@ -62,9 +62,9 @@ impl ExecutionEngine {
 
             if matches!(
                 override_phase,
-                Some(crate::application::state::TaskPhase::Conversational)
+                Some(crate::application::state::TaskPhase::Assistant)
             ) {
-                feed.mode = crate::application::feed::FeedMode::Conversational;
+                feed.mode = crate::application::feed::FeedMode::Assistant;
             }
 
             let _ = feed.update_feed(chat).await;
@@ -81,6 +81,10 @@ impl ExecutionEngine {
         loop {
             if steps >= max_steps {
                 let _ = chat.send_notification("⚠️ Max steps reached.").await;
+                // If max steps reached, consider the task as potentially incomplete or requiring manual intervention.
+                // We don't have a clear "final_msg" here, so we return None.
+                let mut feed = self.feed.lock().await;
+                feed.add_completion_message("Task reached max steps without explicit completion.".to_string());
                 break;
             }
             steps += 1;
@@ -104,6 +108,18 @@ impl ExecutionEngine {
                 }
                 room.task_phase.clone()
             };
+
+            // Update Feed Identity based on Phase
+            {
+                let role_title = match task_phase {
+                    crate::application::state::TaskPhase::Planning => "Architect",
+                    crate::application::state::TaskPhase::Execution => "Developer",
+                    crate::application::state::TaskPhase::Assistant => "Assistant",
+                    _ => "Engineer",
+                };
+                let mut feed = self.feed.lock().await;
+                feed.set_agent_name(role_title.to_string());
+            }
 
             // 1. Build Context
             // Resolve Active Task directory relative to CWD
@@ -184,6 +200,7 @@ impl ExecutionEngine {
 
             let projects_root = {
                 let f = self.feed.lock().await;
+                // Agent name is set based on Phase earlier in the loop
                 f.projects_root()
             };
 
@@ -241,13 +258,20 @@ impl ExecutionEngine {
                         &current_date,
                     )
                 }
-                crate::application::state::TaskPhase::Conversational => {
-                    crate::strings::prompts::conversational_mode_turn(
+                crate::application::state::TaskPhase::Assistant => {
+                    {
+                        let mut f = self.feed.lock().await;
+                        f.set_agent_name("Assistant".to_string());
+                    }
+                    crate::strings::prompts::assistant_mode_turn(
                         &cwd_msg,
                         &roadmap_content,
-                        &tasks_content,
+                        &tasks_checklist_content,
                         &plan_content,
+                        &architecture_content,
+                        &progress_content,
                         &history,
+                        &tasks_content, // REQUEST content is in tasks_content var as noted in comment
                     )
                 }
             };
@@ -301,7 +325,7 @@ impl ExecutionEngine {
             if actions_with_indices.is_empty() {
                 // Conversational response
                 match task_phase {
-                    crate::application::state::TaskPhase::Conversational => {
+                    crate::application::state::TaskPhase::Assistant => {
                         {
                             let mut feed = self.feed.lock().await;
                             feed.set_completion(response.clone());
@@ -310,7 +334,17 @@ impl ExecutionEngine {
                         return Ok(Some(response));
                     }
                     _ => {
-                        let _ = chat.send_message(&response).await;
+                        // In Execution/Planning, treat raw text as a thought/activity 
+                        // instead of dumping it into the chat.
+                        {
+                            let mut feed = self.feed.lock().await;
+                            // Clean up the response (optional, or rely on feed formatter truncating)
+                            let cleaned = clean_agent_thought(&response);
+                            if !cleaned.is_empty() {
+                                feed.set_agent_thought(cleaned);
+                                let _ = feed.update_feed(chat).await;
+                            }
+                        }
                     }
                 }
 
@@ -333,40 +367,12 @@ impl ExecutionEngine {
                     let pre_text = &response[last_response_index..start_idx];
                     
                     // Clean the thought: 
-                    // 1. Remove "Output: ..." lines (hallucinations)
-                    // 2. Remove code block markers
-                    // 3. Remove common build log patterns (Compiling, error[...] etc)
-                    let agent_thought = pre_text
-                        .lines()
-                        .filter(|line| {
-                            let t = line.trim();
-                             !t.starts_with("Output:") 
-                            && !t.starts_with("```")
-                            && !t.starts_with("Compiling ")
-                            && !t.starts_with("Finished ")
-                            && !t.starts_with("Running ")
-                            && !t.starts_with("Checking ") // Cargo check
-                            && !t.starts_with("Creating ") // Cargo init
-                            && !t.starts_with("error")     // Catch error: and error[...]
-                            && !t.starts_with("warning")   // Catch warning: and warning[...]
-                            && !t.starts_with("|")         // Rustc error bars
-                            && !t.starts_with("=")         // Rustc notes
-                            && !t.starts_with("^")         // Rustc pointers
-                            && !t.starts_with("note:")     // Rustc notes
-                            && !t.starts_with("help:")     // Rustc help
-                            && !t.starts_with("note:")     // Rustc notes
-                            && !t.starts_with("help:")     // Rustc help
-                            && !t.starts_with("...")
-                            && !t.is_empty()               // Remove blank lines
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n");
+                    let trimmed = clean_agent_thought(pre_text);
 
-                    let trimmed = agent_thought.trim();
                      // Only update if there is meaningful text (ignore small punctuation or whitespace)
                     if !trimmed.is_empty() && trimmed.len() > 3 { 
                         let mut feed = self.feed.lock().await;
-                        feed.set_agent_thought(trimmed.to_string());
+                        feed.set_agent_thought(trimmed.clone());
                         let _ = feed.update_feed(chat).await;
                     }
                 }
@@ -427,8 +433,22 @@ impl ExecutionEngine {
                                     feed.add_activity("✅ Planning Complete".to_string());
                                     
                                     // 2. Set the Menu as the completion message (Footer)
-                                    let menu = "Open: .1 Architecture | .2 Roadmap | .3 Plan | .4 Tasks\n\nType `.start` to proceed to Execution.";
+                                    let menu = "Open: .1 Architecture | .2 Roadmap | .3 Plan | .4 Tasks";
                                     feed.add_completion_message(menu.to_string());
+
+                                    // START AUTO-CONTINUE TIMER
+                                    let now = chrono::Utc::now().timestamp();
+                                    let now = chrono::Utc::now().timestamp();
+                                    let delay_minutes = self._config.system.auto_start_delay_minutes.unwrap_or(30);
+                                    let target = now + (delay_minutes as i64 * 60);
+                                    
+                                    {
+                                        let mut guard = self.state.lock().await;
+                                        if let Some(room) = guard.rooms.get_mut(&chat.room_id()) {
+                                            room.task_completion_time = Some(now);
+                                        }
+                                        feed.auto_start_timestamp = Some(target);
+                                    }
                                     
                                     // 3. Squash and Update
                                     feed.squash();
@@ -440,7 +460,7 @@ impl ExecutionEngine {
                                 ));
                             }
                             crate::application::state::TaskPhase::Execution
-                            | crate::application::state::TaskPhase::Conversational => {
+                            | crate::application::state::TaskPhase::Assistant => {
                                 {
                                     let mut feed = self.feed.lock().await;
                                     
@@ -466,11 +486,23 @@ impl ExecutionEngine {
                                     
                                     // Only add completion text if we are in Conversational mode, OR if it's a very short specific message.
                                     // For Execution, the "Thinking" block usually covers the intent, and the actions show the result.
-                                    // The extra text is often just "I have done X, Y, Z" which is redundant.
-                                    if matches!(task_phase, crate::application::state::TaskPhase::Conversational) {
-                                         if !final_msg.is_empty() {
-                                            feed.add_completion_message(final_msg);
+                                    // But we want to show the final "Milestone X Complete" message if present.
+                                    if !final_msg.is_empty() && final_msg.len() < 1000 {
+                                        feed.add_completion_message(final_msg);
+                                    }
+
+                                    // START AUTO-CONTINUE TIMER
+                                    let now = chrono::Utc::now().timestamp();
+                                    let now = chrono::Utc::now().timestamp();
+                                    let delay_minutes = self._config.system.auto_start_delay_minutes.unwrap_or(30);
+                                    let target = now + (delay_minutes as i64 * 60);
+                                    
+                                    {
+                                        let mut guard = self.state.lock().await;
+                                        if let Some(room) = guard.rooms.get_mut(&chat.room_id()) {
+                                            room.task_completion_time = Some(now);
                                         }
+                                        feed.auto_start_timestamp = Some(target);
                                     }
 
                                     feed.process_action(&crate::domain::types::AgentAction::Done)
@@ -493,7 +525,7 @@ impl ExecutionEngine {
 
                         {
                             let mut feed = self.feed.lock().await;
-                            feed.add_activity(format!("Listing dir `{}`", sanitized));
+                            feed.add_activity(format!("Listing dir {}", sanitized));
                             let _ = feed.update_feed(chat).await;
                         }
 
@@ -538,10 +570,10 @@ impl ExecutionEngine {
                         {
                             let mut feed = self.feed.lock().await;
                             if success {
-                                feed.replace_last_activity(format!("Listed `{}`", sanitized), true);
+                                feed.replace_last_activity(format!("Listed {}", sanitized), true);
                             } else {
                                 feed.replace_last_activity(
-                                    format!("Failed to list `{}`", sanitized),
+                                    format!("Failed to list {}", sanitized),
                                     false,
                                 );
                             }
@@ -563,7 +595,7 @@ impl ExecutionEngine {
                         
                         {
                             let mut feed = self.feed.lock().await;
-                            feed.add_activity(format!("Finding `{} {}`", sanitized_path, pattern));
+                            feed.add_activity(format!("Finding {} {}", sanitized_path, pattern));
                             let _ = feed.update_feed(chat).await;
                         }
 
@@ -597,10 +629,10 @@ impl ExecutionEngine {
                         {
                             let mut feed = self.feed.lock().await;
                             if success {
-                                feed.replace_last_activity(format!("Found `{} {}`", sanitized_path, pattern), true);
+                                feed.replace_last_activity(format!("Found {} {}", sanitized_path, pattern), true);
                             } else {
                                 feed.replace_last_activity(
-                                    format!("Failed find `{} {}`", sanitized_path, pattern),
+                                    format!("Failed find {} {}", sanitized_path, pattern),
                                     false,
                                 );
                             }
@@ -622,7 +654,7 @@ impl ExecutionEngine {
                                 && !path.ends_with(".json")
                             {
                                 let err_msg = format!(
-                                    "PERMISSION DENIED: You are in the PLANNING phase. You cannot write code files (`{}`) yet. You can only write documentation (.md). If you have finished the plan, output `NO_MORE_STEPS`.",
+                                    "PERMISSION DENIED: You are in the PLANNING phase. You cannot write code files (`{}`) yet. You can only write documentation (.md, .txt, .yaml, .json). If you have finished the plan, output `NO_MORE_STEPS`.",
                                     path
                                 );
                                 history.push_str(&format!("\nSystem: {}\n", err_msg));
@@ -631,7 +663,7 @@ impl ExecutionEngine {
                                 {
                                     let mut feed = self.feed.lock().await;
                                     feed.add_activity(format!(
-                                        "⚠️ Blocked write to `{}` (Planning Only)",
+                                        "⚠️ Blocked write to {} (Planning Only)",
                                         path
                                     ));
                                     let _ = feed.update_feed(chat).await;
@@ -652,7 +684,7 @@ impl ExecutionEngine {
 
                         {
                             let mut feed = self.feed.lock().await;
-                            feed.add_activity(format!("Writing `{}`", sanitized));
+                            feed.add_activity(format!("Writing {}", sanitized));
                             let _ = feed.update_feed(chat).await;
                         }
 
@@ -687,12 +719,12 @@ impl ExecutionEngine {
                             let mut feed = self.feed.lock().await;
                             if success {
                                 feed.replace_last_activity(
-                                    format!("Wrote `{}`", sanitized),
+                                    format!("Wrote {}", sanitized),
                                     true,
                                 );
                             } else {
                                 feed.replace_last_activity(
-                                    format!("Failed to write `{}`", sanitized),
+                                    format!("Failed to write {}", sanitized),
                                     false,
                                 );
                                 // Keep error details for failure
@@ -705,7 +737,7 @@ impl ExecutionEngine {
                     crate::domain::types::AgentAction::ReadFile(path) => {
                         {
                             let mut feed = self.feed.lock().await;
-                            feed.add_activity(format!("Reading file `{}`", path));
+                            feed.add_activity(format!("Reading file {}", path));
                             let _ = feed.update_feed(chat).await;
                         }
                         let client = self.tools.lock().await;
@@ -751,12 +783,12 @@ impl ExecutionEngine {
                             );
 
                             if success {
-                                feed.replace_last_activity(format!("Read `{}`", sanitized), true);
+                                feed.replace_last_activity(format!("Read {}", sanitized), true);
                                 // Don't show full content in feed, maybe irrelevant
                                 // Don't show full content or byte count in feed
 
                             } else {
-                                feed.replace_last_activity(format!("Failed to read `{}`", sanitized), false);
+                                feed.replace_last_activity(format!("Failed to read {}", sanitized), false);
                                 feed.update_last_entry(out.clone(), false);
                             }
                             let _ = feed.update_feed(chat).await;
@@ -858,12 +890,13 @@ impl ExecutionEngine {
                             let sanitized_cmd = crate::application::utils::sanitize_path(
                                 &cmd,
                                 root_to_use
-                            );
+                            ).replace('`', "");
 
                             if refined_success {
-                                feed.replace_last_activity(format!("Ran `{}`", sanitized_cmd), true);
+                                feed.replace_last_activity(format!("Ran {}", sanitized_cmd), true);
                             } else {
-                                feed.replace_last_activity(format!("Failed `{}`", sanitized_cmd), false);
+                                // Content is just the command. Label "Failed" will handle the prefix.
+                                feed.replace_last_activity(sanitized_cmd, false);
                             }
 
                             let _ = feed.update_feed(chat).await;
@@ -884,7 +917,7 @@ impl ExecutionEngine {
                                 crate::application::state::TaskPhase::Execution
                             }
                             "conversational" => {
-                                crate::application::state::TaskPhase::Conversational
+                                crate::application::state::TaskPhase::Assistant
                             }
                             _ => {
                                 tracing::warn!("DEBUG: Invalid SwitchMode phase: '{}'", phase);
@@ -952,4 +985,67 @@ impl ExecutionEngine {
 
         Ok(None) // Loop finished
     }
+}
+
+fn clean_agent_thought(text: &str) -> String {
+    let mut cleaned = String::new();
+
+    // 1. Try to find ```thought ... ``` block
+    if let Some(start) = text.find("```thought") {
+        let remainder = &text[start + 10..]; // Skip ```thought
+        if let Some(end) = remainder.find("```") {
+             cleaned = remainder[..end].trim().to_string();
+        }
+    } else {
+
+        // 2. Fallback to line filtering (legacy)
+        // We stop at the first code block (```) because that usually indicates a tool call
+        let mut lines = Vec::new();
+        for line in text.lines() {
+            let t = line.trim();
+            if t.starts_with("```") {
+                break; 
+            }
+            if !t.starts_with("Output:") 
+                && !t.starts_with("Compiling ")
+                && !t.starts_with("Finished ")
+                && !t.starts_with("Running ")
+                && !t.starts_with("Checking ") 
+                && !t.starts_with("Creating ") 
+                && !t.starts_with("error")     
+                && !t.starts_with("warning")   
+                && !t.starts_with("|")         
+                && !t.starts_with("=")         
+                && !t.starts_with("^^")         
+                && !t.starts_with("note:")     
+                && !t.starts_with("help:")     
+                && !t.starts_with("...")
+                && !t.is_empty() 
+            {
+                lines.push(line);
+            }
+        }
+        cleaned = lines.join("\n");
+    }
+    
+    // 3. Post-processing: Remove "thought" or "Agent:" labels
+    let mut trimmed = cleaned.trim();
+    
+    // Iteratively strip prefixes commonly used by LLMs (case-insensitive)
+    let prefixes = ["thought", "agent", ":"];
+    let mut changed = true;
+    while changed {
+        changed = false;
+        let lower = trimmed.to_lowercase();
+        for prefix in &prefixes {
+            if lower.starts_with(prefix) {
+                trimmed = trimmed[prefix.len()..].trim();
+                // Re-evaluate lower since we trimmed
+                changed = true;
+                break;
+            }
+        }
+    }
+    
+    trimmed.to_string()
 }

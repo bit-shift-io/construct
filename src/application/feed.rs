@@ -17,7 +17,7 @@ pub enum FeedMode {
     PlanReview,
     Final,
     Wizard,
-    Conversational,
+    Assistant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -49,7 +49,13 @@ impl FeedEntry {
 
     pub(crate) fn format_active(&self, is_last: bool) -> String {
         let (icon, bold) = match self.kind {
-            FeedEntryKind::Checkpoint => ("✅", true),
+            FeedEntryKind::Checkpoint => {
+                if self.label == "Failed" {
+                    ("❌", true)
+                } else {
+                    ("✅", true)
+                }
+            },
             FeedEntryKind::Prompt => ("📝", false),
             // Dynamic checkmark logic:
             // If it's Activity (•) AND NOT the last one, it becomes ✅.
@@ -74,7 +80,7 @@ impl FeedEntry {
                  result.push_str(&self.content);
             }
         } else if self.kind == FeedEntryKind::Checkpoint {
-             let icon = if is_last { "🔄" } else { "✅" };
+             // Removed variable shadowing of 'icon'. Using the one defined in match block.
              if self.label == "Completed" {
                   result.push_str(&format!("{} {}", icon, self.content));
              } else {
@@ -100,7 +106,7 @@ impl FeedEntry {
                 } else {
                     output.clone()
                 };
-                result.push_str(&format!("> {}\n", truncated.replace('\n', "\n> ")));
+                result.push_str(&format!("> {}\n", truncated.replace('\n', " ")));
             }
         }
 
@@ -122,7 +128,7 @@ impl FeedEntry {
                  if self.label == "Completed" {
                       result.push_str(&format!("✅ {}", self.content));
                  } else if self.label == "Failed" {
-                      result.push_str(&format!("❌ {}", self.content));
+                      result.push_str(&format!("❌ Failed: {}", self.content));
                  } else {
                       result.push_str(&format!("✅ {}: {}", self.label, self.content));
                  }
@@ -152,6 +158,8 @@ pub struct FeedManager {
     pub completion_message: Option<String>,
     pub last_agent_thought: Option<String>,
     pub title: String,
+    pub auto_start_timestamp: Option<i64>,
+    pub agent_name: Option<String>,
 }
 
 impl FeedManager {
@@ -175,11 +183,17 @@ impl FeedManager {
             completion_message: None,
             last_agent_thought: None,
             title: "Construct".to_string(),
+            auto_start_timestamp: None,
+            agent_name: None,
         }
     }
 
     pub fn set_title(&mut self, title: String) {
         self.title = title;
+    }
+
+    pub fn set_agent_name(&mut self, name: String) {
+        self.agent_name = Some(name);
     }
 
     pub fn initialize(&mut self, task: String) {
@@ -190,6 +204,12 @@ impl FeedManager {
         self.feed_event_id = None;
         self.completion_message = None;
         self.last_agent_thought = None;
+        self.auto_start_timestamp = None;
+        // self.agent_name = None; // Don't clear agent name, as it might be set before initialize or we want it persistent for the session? 
+        // Actually engine sets it after initialize usually? No wait, engine calls runs task.
+        // Let's safe-guard by not clearing it here, relying on engine to update it if it changes.
+        // Or better, clear it, and ensure engine sets it.
+        self.agent_name = None;
 
         self.add_activity("Task Started".to_string());
     }
@@ -275,18 +295,18 @@ impl FeedManager {
             && entry.kind == FeedEntryKind::Activity
         {
             entry.content = new_content; // Update text
-            // We rely on format_active to add icon?
-            // format_active uses 🔄 for Activity.
-            // We might need to change Kind to Checkpoint for "Done" items?
-            // Checkpoint uses ✅.
+            
+            // If finished, convert from pending (Activity) to permanent (Checkpoint)
+            // or just update label?
+            // User wants 'X' for failed.
             if success {
                 entry.kind = FeedEntryKind::Checkpoint;
-                entry.label = "Completed".to_string(); // or System?
+                entry.label = "Completed".to_string(); 
             } else {
-                // Keep Activity but maybe mark failed?
+                entry.kind = FeedEntryKind::Checkpoint; // Persist validation/failure
                 entry.label = "Failed".to_string();
             }
-            entry.output = None; // Clear any output text
+            // entry.output = None; // Keep output for failure debugging if needed?
         }
     }
     // Prefer strict methods now.
@@ -326,7 +346,7 @@ impl FeedManager {
             FeedMode::PlanReview => FeedFormatter::format_plan_review(self),
             FeedMode::Final => FeedFormatter::format_final(self),
             FeedMode::Wizard => FeedFormatter::format_wizard(self),
-            FeedMode::Conversational => FeedFormatter::format_conversational(self),
+            FeedMode::Assistant => FeedFormatter::format_conversational(self),
         }
     }
 
@@ -343,25 +363,25 @@ impl FeedManager {
             AgentAction::ShellCommand(cmd) => {
                 let sanitized =
                     crate::application::utils::sanitize_path(cmd, self.projects_root.as_deref());
-                self.add_activity(format!("Running: `{}`", sanitized));
+                self.add_activity(format!("Running: {}", sanitized));
             }
             AgentAction::Done => {
                 self.squash();
                 self.add_activity("Task Complete".to_string());
             }
             AgentAction::WriteFile(path, _) => {
-                self.add_activity(format!("Writing: `{}`", path));
+                self.add_activity(format!("Writing: {}", path));
             }
             AgentAction::Find(path, pattern) => {
                 let sanitized =
                     crate::application::utils::sanitize_path(path, self.projects_root.as_deref());
-                self.add_activity(format!("Finding: `{} {}`", sanitized, pattern));
+                self.add_activity(format!("Finding: {} {}", sanitized, pattern));
             }
             AgentAction::ReadFile(path) => {
-                self.add_activity(format!("Reading: `{}`", path));
+                self.add_activity(format!("Reading: {}", path));
             }
             AgentAction::ListDir(path) => {
-                self.add_activity(format!("Listing: `{}`", path));
+                self.add_activity(format!("Listing: {}", path));
             }
             AgentAction::SwitchMode(phase) => {
                 self.add_activity(format!("Switching to mode: {}", phase));
