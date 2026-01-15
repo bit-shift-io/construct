@@ -27,13 +27,14 @@ impl ProjectManager {
         std::fs::create_dir_all(&project_path)
             .map_err(|e| anyhow::anyhow!("Failed to create project dir: {}", e))?;
 
-        // Create specs directory
-        std::fs::create_dir_all(project_path.join("specs"))
-            .map_err(|e| anyhow::anyhow!("Failed to create specs dir: {}", e))?;
-
         // Create tasks directory
         std::fs::create_dir_all(project_path.join("tasks"))
             .map_err(|e| anyhow::anyhow!("Failed to create tasks dir: {}", e))?;
+
+        // Create specs directory inside tasks
+        std::fs::create_dir_all(project_path.join(crate::domain::paths::SPECS_DIR))
+            .map_err(|e| anyhow::anyhow!("Failed to create tasks/specs dir: {}", e))?;
+
 
         // We leave the file creation to the Agent in the New Project phase.
 
@@ -45,7 +46,7 @@ impl ProjectManager {
         let client = self.tools.lock().await;
         // Check for roadmap.md existence using read_file as a proxy.
         client
-            .read_file(&format!("{}/specs/roadmap.md", path))
+            .read_file(&crate::domain::paths::roadmap_path(path))
             .await
             .is_ok()
     }

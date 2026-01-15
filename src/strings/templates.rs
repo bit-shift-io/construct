@@ -8,3 +8,5 @@ pub const ROADMAP_TEMPLATE: &str = include_str!("../../templates/roadmap.md");
 pub const ARCHITECTURE_TEMPLATE: &str = include_str!("../../templates/architecture.md");
 pub const WALKTHROUGH_TEMPLATE: &str = include_str!("../../templates/walkthrough.md");
 pub const PROGRESS_TEMPLATE: &str = include_str!("../../templates/progress.md");
+pub const TASKS_TEMPLATE: &str = include_str!("../../templates/tasks.md");
+pub const GUIDELINES_TEMPLATE: &str = include_str!("../../templates/guidelines.md");

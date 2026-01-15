@@ -1,9 +1,9 @@
 # Progress History
 
 ## [{{CURRENT_DATE}}] Session Start
-- **Goal**: [Brief description of the goal]
+- **Goal**: <<GOAL_DESCRIPTION>>
 - **Actions Taken**:
-  - [Action 1]
-  - [Action 2]
-- **Outcome**: [Success/Failure/In Progress]
-- **Next Steps**: [What should be done next]
+  - <<ACTION_1>>
+  - <<ACTION_2>>
+- **Outcome**: <<OUTCOME>>
+- **Next Steps**: <<NEXT_STEPS>>

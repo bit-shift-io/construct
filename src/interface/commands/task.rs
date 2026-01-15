@@ -155,8 +155,8 @@ where
                     }
                 })
                 .collect();
-            let safe_desc = if safe_desc.len() > 30 {
-                &safe_desc[..30]
+            let safe_desc = if safe_desc.len() > 100 {
+                &safe_desc[..100]
             } else {
                 &safe_desc
             };

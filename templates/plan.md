@@ -1,22 +1,24 @@
-# Implementation Plan - [title]
+# Implementation Plan - <<TASK_NAME>>
+
+> **Status:** 🟡 In Progress
+> **Rule:** All file changes must be verified before marking complete.
 
 ## Goal
-(Briefly describe what this task achieves)
+<<GOAL_DESCRIPTION>>
 
 ## Tech Stack
 - languages
 - dependencies
-- API's
 
 ## Proposed Changes
-(briefly describe how we achive the task)
+<<PROPOSED_CHANGES_SUMMARY>>
 
-### [create/modify/delete] [File Path]
+### <<ACTION>> <<FILE_PATH>>
 - Change A
 - Change B
 
 ## Verification Plan
-1. How will we verify this works?
+1. <<VERIFICATION_STEP_1>>
 
 ## Future Enhancements
-(suggestions for future enhancments)
+<<FUTURE_ENHANCEMENTS>>

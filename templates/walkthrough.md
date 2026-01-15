@@ -1,5 +1,8 @@
 # Walkthrough - [title]
 
+> **Status:** 🟡 In Progress
+> **Rule:** Verification must include both automated checks and manual validation.
+
 ## Overview
 
 

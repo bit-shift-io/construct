@@ -25,6 +25,9 @@ pub struct AppConfig {
     /// System-wide settings
     #[serde(default)]
     pub system: SystemConfig,
+    /// TUI Configuration
+    #[serde(default)]
+    pub tui: TuiConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -166,4 +169,20 @@ pub struct MatrixConfig {
     pub homeserver: String,
     #[serde(default)]
     pub display_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct TuiConfig {
+    #[serde(default = "default_tui_enabled")]
+    pub enabled: bool,
+}
+
+fn default_tui_enabled() -> bool {
+    true
+}
+
+impl Default for TuiConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
 }

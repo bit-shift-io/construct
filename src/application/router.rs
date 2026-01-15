@@ -203,8 +203,8 @@ impl CommandRouter {
                     };
 
                     let file_to_read = match cmd {
-                        ".1" => format!("{}/specs/architecture.md", wd),
-                        ".2" => format!("{}/specs/roadmap.md", wd),
+                        ".1" => crate::domain::paths::architecture_path(&wd),
+                        ".2" => crate::domain::paths::roadmap_path(&wd),
                         ".3" => {
                             if let Some(task_rel) = &active_task {
                                 format!("{}/{}/plan.md", wd, task_rel)

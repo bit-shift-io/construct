@@ -11,10 +11,10 @@
 ## Architecture
 {{ARCHITECTURE}}
 
+## Guidelines
+{{GUIDELINES}}
 
 
-## User Request
-{{REQUEST}}
 
 ## Tasks Checklist
 {{TASKS_CHECKLIST}}

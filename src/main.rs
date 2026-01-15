@@ -24,7 +24,7 @@ use matrix_sdk::{
         message::SyncRoomMessageEvent,
     },
 };
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::sync::{Arc, OnceLock};
 use tokio::sync::Mutex;
@@ -66,25 +66,40 @@ async fn main() -> Result<()> {
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        // Default to info, but suppress noisy matrix crates
         tracing_subscriber::EnvFilter::new("info,matrix_sdk=warn,matrix_sdk_base=warn,matrix_sdk_crypto=error,ruma=warn,hyper=warn")
     });
 
-    // Layer for file
+    // Layer for file (Always active)
     let file_layer = tracing_subscriber::fmt::layer()
         .with_writer(non_blocking)
         .with_ansi(false);
 
-    // Layer for console
-    let console_layer = tracing_subscriber::fmt::layer().with_writer(std::io::stdout);
+    // TUI Logging Logic
+    // We create the buffer here so we can pass it to TuiApp later
+    let tui_logs = Arc::new(Mutex::new(VecDeque::new()));
+    
+    let tui_layer = if config.tui.enabled {
+        Some(crate::infrastructure::tui::TuiLogLayer {
+            logs: tui_logs.clone(),
+        })
+    } else {
+        None
+    };
+
+    let console_layer = if !config.tui.enabled {
+        Some(tracing_subscriber::fmt::layer().with_writer(std::io::stdout))
+    } else {
+        None
+    };
 
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
 
     tracing_subscriber::registry()
         .with(env_filter)
-        .with(console_layer)
         .with(file_layer)
+        .with(console_layer)
+        .with(tui_layer)
         .init();
 
     tracing::info!("Starting Construct...");
@@ -111,6 +126,14 @@ async fn main() -> Result<()> {
     // 4. Initialize Application Components
     let project_manager = Arc::new(ProjectManager::new(tools.clone()));
     let state = Arc::new(Mutex::new(crate::application::state::BotState::load()));
+
+    // Hydrate State (Restore FeedManagers)
+    {
+        let mut guard = state.lock().await;
+        for room in guard.rooms.values_mut() {
+            room.ensure_feed_manager(tools.clone(), config.system.projects_dir.clone());
+        }
+    }
 
     // 5. Matrix Setup
     let client = Client::builder()
@@ -214,7 +237,8 @@ async fn main() -> Result<()> {
                 if let Some(ts) = completion_time {
                     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
                     let diff = now - ts;
-                    let timeout = 1800; // 30 mins
+                    let delay = auto_config.system.auto_start_delay_minutes.unwrap_or(30);
+                    let timeout = (delay * 60) as i64;
 
                     if diff >= timeout {
                         // EXPIRED - Trigger Start
@@ -290,12 +314,19 @@ async fn main() -> Result<()> {
         }
     });
 
+    // Prepare Clones for the Matrix Closure
+    let loop_config = config.clone();
+    let loop_tools = tools.clone();
+    let loop_llm = llm.clone();
+    let loop_state = state.clone();
+    let loop_pm = project_manager.clone();
+
     client.add_event_handler(move |ev: SyncRoomMessageEvent, room: Room| {
-        let config = config.clone();
-        let tools = tools.clone();
-        let llm = llm.clone();
-        let state = state.clone();
-        let project_manager = project_manager.clone();
+        let config = loop_config.clone();
+        let tools = loop_tools.clone();
+        let llm = loop_llm.clone();
+        let state = loop_state.clone();
+        let project_manager = loop_pm.clone();
 
         async move {
             let make_chat = |room: Room| MatrixService::new(room);
@@ -343,7 +374,37 @@ async fn main() -> Result<()> {
         }
     });
 
-    client.sync(SyncSettings::default()).await?;
+    // 7. Start Loops
+    // Spawn Matrix Sync
+    let sync_client = client.clone();
+    let sync_handle = tokio::spawn(async move {
+        sync_client.sync(SyncSettings::default()).await
+    });
+
+    if config.tui.enabled {
+        tracing::info!("Initializing TUI...");
+        let mut app = crate::infrastructure::tui::TuiApp::new(
+            config.clone(),
+            state.clone(),
+            tools.clone(),
+            llm.clone(),
+            project_manager.clone(),
+            tui_logs.clone(),
+            client.clone(),
+        );
+        let terminal = ratatui::init();
+        let res = app.run(terminal).await;
+        ratatui::restore();
+        
+        if let Err(e) = res {
+            tracing::error!("TUI Error: {}", e);
+        }
+    } else {
+        // If TUI is disabled, we must wait on the sync handle to keep the process alive
+        if let Err(e) = sync_handle.await {
+             tracing::error!("Matrix Sync Panic: {}", e);
+        }
+    }
 
     Ok(())
 }

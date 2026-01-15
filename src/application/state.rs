@@ -98,7 +98,23 @@ pub struct RoomState {
     pub task_completion_time: Option<i64>,
 }
 
-impl RoomState {}
+impl RoomState {
+    pub fn ensure_feed_manager(
+        &mut self,
+        tools: Arc<Mutex<crate::infrastructure::tools::executor::ToolExecutor>>,
+        projects_root: Option<String>,
+    ) {
+        if self.feed_manager.is_none() {
+            let mgr = FeedManager::new(
+                self.current_project_path.clone(),
+                projects_root,
+                tools,
+                self.feed_event_id.clone(),
+            );
+            self.feed_manager = Some(Arc::new(Mutex::new(mgr)));
+        }
+    }
+}
 
 /// Persistent state of the bot, mapping Room IDs to their respective room states.
 /// Saved to `data/state.json`.

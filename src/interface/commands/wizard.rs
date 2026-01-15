@@ -333,25 +333,30 @@ pub async fn handle_step(
                             .cloned()
                             .unwrap_or_default();
 
-                        // Create task subfolder: tasks/001-init
-                        let task_dir = std::path::Path::new(&path).join("tasks").join("001-init");
-                        let _ = std::fs::create_dir_all(&task_dir);
+                        // Create specs directory (redundant check, but safe)
+                        let specs_dir = std::path::Path::new(&path).join("tasks").join("specs");
+                        let _ = std::fs::create_dir_all(&specs_dir);
 
-                        // Write request.md
+                        // Write request.md to specs/request.md (Global Request History)
+                        let current_date = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
+                        let req_template = crate::strings::templates::REQUEST_TEMPLATE
+                             .replace("{{CURRENT_DATE}}", &current_date);
+                        
                         if !description_str.is_empty() {
-                            let req_content = crate::strings::templates::REQUEST_TEMPLATE
-                                .replace("{{OBJECTIVE}}", &description_str);
-                            let _ = std::fs::write(task_dir.join("request.md"), req_content);
+                            let req_content = req_template.replace("{{OBJECTIVE}}", &description_str);
+                            let _ = std::fs::write(specs_dir.join("request.md"), req_content);
                         } else {
-                            let req_content = crate::strings::templates::REQUEST_TEMPLATE
-                                .replace("{{OBJECTIVE}}", "(No description provided)");
-                            let _ = std::fs::write(task_dir.join("request.md"), req_content);
+                            let req_content = req_template.replace("{{OBJECTIVE}}", "(No description provided)");
+                            let _ = std::fs::write(specs_dir.join("request.md"), req_content);
                         }
 
                         // Note: plan.md creation is delegated to Agent via new_project_prompt.
 
                         // Set active task
-                        room_state.active_task = Some("tasks/001-init".to_string());
+                        // room_state.active_task = Some("tasks/001-init".to_string());
+                        // We disable auto-set to allow the Architect to define the first milestone dynamically.
+                        // User will run .start to begin.
+                        room_state.active_task = None;
 
                         _success_path = Some(path.clone());
 
@@ -424,6 +429,7 @@ pub async fn start_agent_wizard(
         room.wizard.data.clear();
         if let Some(feed) = &room.feed_manager {
              let mut f = feed.lock().await;
+             f.mode = crate::application::feed::FeedMode::Wizard;
              f.set_title("🤖 Agent Configuration".to_string());
         }
         room.feed_manager.clone()

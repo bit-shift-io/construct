@@ -25,7 +25,7 @@ where
     C: ChatProvider + Clone + Send + Sync + 'static,
 {
     // Check if we are in Planning phase
-    let (active_task, agent_name, phase) = {
+    let (mut active_task, agent_name, phase) = {
         let mut guard = state.lock().await;
         let room = guard.get_room_state(&chat.room_id());
 
@@ -43,6 +43,36 @@ where
             let room = guard.get_room_state(&chat.room_id());
             room.task_phase = TaskPhase::Execution;
             room.stop_requested = false; // Ensure cleared
+        }
+
+        // Auto-detect Start Task if None (e.g. after Architect init)
+        if active_task.is_none() {
+            if let Some(wd) = &workdir {
+                 let tasks_dir = std::path::Path::new(wd).join("tasks");
+                 if tasks_dir.exists() {
+                     if let Ok(entries) = std::fs::read_dir(tasks_dir) {
+                         let mut dirs: Vec<String> = entries
+                             .filter_map(|e| e.ok())
+                             .filter(|e| e.path().is_dir())
+                             .map(|e| e.file_name().to_string_lossy().to_string())
+                             .filter(|name| name != "specs")
+                             .collect();
+                         dirs.sort();
+                         
+                         if let Some(first) = dirs.first() {
+                             let new_task = format!("tasks/{}", first);
+                             
+                             // Update Local Var
+                             active_task = Some(new_task.clone());
+
+                             // Update State
+                             let mut guard = state.lock().await;
+                             let room = guard.get_room_state(&chat.room_id());
+                             room.active_task = Some(new_task);
+                         }
+                     }
+                 }
+            }
         }
 
         // Notification removed as per user request
@@ -94,9 +124,11 @@ where
     } else {
         // Smart Start Logic: Look for next milestone
         if let Some(wd) = workdir {
-             let roadmap_path = std::path::Path::new(&wd).join("specs/roadmap.md");
+             let roadmap = crate::domain::paths::roadmap_path(&wd);
+             let roadmap_path = std::path::Path::new(&roadmap);
+
              if roadmap_path.exists() {
-                 let content = std::fs::read_to_string(&roadmap_path).unwrap_or_default();
+                 let content = std::fs::read_to_string(roadmap_path).unwrap_or_default();
                  let mut next_task = None;
                  
                  for line in content.lines() {

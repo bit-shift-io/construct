@@ -67,6 +67,15 @@ impl FeedFormatter {
              }
         }
 
+        if let Some(ts) = manager.auto_start_timestamp {
+             let now = Local::now().timestamp();
+             let remaining = ts - now;
+             if remaining > 0 {
+                 let mins = (remaining + 59) / 60;
+                 content.push_str(&format!("\n\n**Next Steps**: Auto-starts in **{}m**...", mins));
+             }
+        }
+
         content
     }
 

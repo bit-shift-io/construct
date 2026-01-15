@@ -6,3 +6,4 @@
 pub mod llm;
 pub mod matrix;
 pub mod tools;
+pub mod tui;

@@ -4,6 +4,13 @@
 ```write path/to/file
 Content here...
 ```
+   - **For Markdown/Code**: If content contains backticks, use 4-ticks:
+````write path/to/markdown.md
+# Header
+```rust
+fn main() {}
+```
+````
 
 2. **Read File**:
 ```read path/to/file```
@@ -46,4 +53,5 @@ cmd args
 # CRITICAL FORMATTING RULES
 1. **NO XML**: DO NOT use XML tags like `<bash>`, `<write_to_file>`, or `<plan>`.
 2. **MARKDOWN ONLY**: ALL code (file content, commands) MUST be inside triple-backtick code blocks.
+   - **EXCEPTION**: If the content ITSELF contains triple backticks (e.g. writing a markdown file with code blocks), you MUST use **QUADRUPLE backticks** (` ```` `) to wrap the tool block. This is CRITICAL for `tasks/specs/architecture.md` and other markdown files.
 3. **STRICT TOOL USAGE**: Follow the format in `Available Tools` EXACTLY. Do not invent new tools or arguments.

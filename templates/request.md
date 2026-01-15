@@ -1,7 +1,4 @@
-# User Request
+# Request History
 
-## Objective
+## [{{CURRENT_DATE}}] Initial Request
 {{OBJECTIVE}}
-
-## Additional Context
-(Add any emails, logs, or extra details here)

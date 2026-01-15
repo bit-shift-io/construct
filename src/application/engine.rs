@@ -130,38 +130,37 @@ impl ExecutionEngine {
             };
 
             let (
-                tasks_content,
                 tasks_checklist_content,
                 roadmap_content,
                 architecture_content,
                 progress_content,
                 plan_content,
+                guidelines_content,
             ) = if let Some(wd) = &working_dir {
                 let client = self.tools.lock().await;
                 // Specs
                 let roadmap = client
-                    .read_file(&format!("{}/specs/roadmap.md", wd))
+                    .read_file(&crate::domain::paths::roadmap_path(wd))
                     .await
                     .unwrap_or_else(|_| "(No roadmap.md)".into());
                 let architecture = client
-                    .read_file(&format!("{}/specs/architecture.md", wd))
+                    .read_file(&crate::domain::paths::architecture_path(wd))
                     .await
                     .unwrap_or_else(|_| "(No architecture.md)".into());
                 let progress = client
-                    .read_file(&format!("{}/specs/progress.md", wd))
+                    .read_file(&crate::domain::paths::progress_path(wd))
                     .await
                     .unwrap_or_else(|_| "(No progress history yet)".into());
+                let guidelines = client
+                    .read_file(&crate::domain::paths::guidelines_path(wd))
+                    .await
+                    .unwrap_or_else(|_| "(No guidelines.md)".into());
 
                 // Active Task Context
-                let (request, tasks_checklist, plan) = if let Some(task_rel) = &active_task_rel_path
+                let (tasks_checklist, plan) = if let Some(task_rel) = &active_task_rel_path
                 {
-                    let request_path = format!("{}/{}/request.md", wd, task_rel);
                     let tasks_path = format!("{}/{}/tasks.md", wd, task_rel);
                     let plan_path = format!("{}/{}/plan.md", wd, task_rel);
-                    let r = client
-                        .read_file(&request_path)
-                        .await
-                        .unwrap_or_else(|_| "(No request.md)".into());
                     let t = client
                         .read_file(&tasks_path)
                         .await
@@ -170,22 +169,21 @@ impl ExecutionEngine {
                         .read_file(&plan_path)
                         .await
                         .unwrap_or_else(|_| "(No plan.md)".into());
-                    (r, t, p)
+                    (t, p)
                 } else {
                     (
-                        "(No active task context)".into(),
                         "(No active task checklist)".into(),
                         "(No active task plan)".into(),
                     )
                 };
 
                 (
-                    request,
                     tasks_checklist,
                     roadmap,
                     architecture,
                     progress,
                     plan,
+                    guidelines,
                 )
             } else {
                 (
@@ -225,7 +223,6 @@ impl ExecutionEngine {
                     crate::strings::prompts::planning_mode_turn(
                         &cwd_msg,
                         &roadmap_content,
-                        &tasks_content,
                         &tasks_checklist_content,
                         &plan_content,
                         &architecture_content,
@@ -233,6 +230,7 @@ impl ExecutionEngine {
                         task_path,
                         &history,
                         &current_date,
+                        &guidelines_content,
                     )
                 }
                 crate::application::state::TaskPhase::Execution => {
@@ -240,7 +238,6 @@ impl ExecutionEngine {
                     crate::strings::prompts::execution_mode_turn(
                         &cwd_msg,
                         &roadmap_content,
-                        &tasks_content,
                         &tasks_checklist_content,
                         &plan_content,
                         &architecture_content,
@@ -248,12 +245,13 @@ impl ExecutionEngine {
                         task_path,
                         &history,
                         &current_date,
+                        &guidelines_content,
                     )
                 }
                 crate::application::state::TaskPhase::NewProject => {
                     crate::strings::prompts::new_project_prompt(
                         "Project",
-                        &tasks_content,
+                        &tasks_checklist_content,
                         &cwd_msg,
                         &current_date,
                     )
@@ -271,7 +269,7 @@ impl ExecutionEngine {
                         &architecture_content,
                         &progress_content,
                         &history,
-                        &tasks_content, // REQUEST content is in tasks_content var as noted in comment
+                        &guidelines_content,
                     )
                 }
             };
@@ -438,7 +436,6 @@ impl ExecutionEngine {
 
                                     // START AUTO-CONTINUE TIMER
                                     let now = chrono::Utc::now().timestamp();
-                                    let now = chrono::Utc::now().timestamp();
                                     let delay_minutes = self._config.system.auto_start_delay_minutes.unwrap_or(30);
                                     let target = now + (delay_minutes as i64 * 60);
                                     
@@ -493,7 +490,7 @@ impl ExecutionEngine {
 
                                     // START AUTO-CONTINUE TIMER
                                     let now = chrono::Utc::now().timestamp();
-                                    let now = chrono::Utc::now().timestamp();
+
                                     let delay_minutes = self._config.system.auto_start_delay_minutes.unwrap_or(30);
                                     let target = now + (delay_minutes as i64 * 60);
                                     
@@ -573,7 +570,7 @@ impl ExecutionEngine {
                                 feed.replace_last_activity(format!("Listed {}", sanitized), true);
                             } else {
                                 feed.replace_last_activity(
-                                    format!("Failed to list {}", sanitized),
+                                    format!("List {}", sanitized),
                                     false,
                                 );
                             }
@@ -632,7 +629,7 @@ impl ExecutionEngine {
                                 feed.replace_last_activity(format!("Found {} {}", sanitized_path, pattern), true);
                             } else {
                                 feed.replace_last_activity(
-                                    format!("Failed find {} {}", sanitized_path, pattern),
+                                    format!("Find {} {}", sanitized_path, pattern),
                                     false,
                                 );
                             }
@@ -724,7 +721,7 @@ impl ExecutionEngine {
                                 );
                             } else {
                                 feed.replace_last_activity(
-                                    format!("Failed to write {}", sanitized),
+                                    format!("Write {}", sanitized),
                                     false,
                                 );
                                 // Keep error details for failure
@@ -788,7 +785,7 @@ impl ExecutionEngine {
                                 // Don't show full content or byte count in feed
 
                             } else {
-                                feed.replace_last_activity(format!("Failed to read {}", sanitized), false);
+                                feed.replace_last_activity(format!("Read {}", sanitized), false);
                                 feed.update_last_entry(out.clone(), false);
                             }
                             let _ = feed.update_feed(chat).await;
@@ -935,11 +932,11 @@ impl ExecutionEngine {
                             let (roadmap, architecture, plan) = if let Some(wd) = &working_dir {
                                 let client = self.tools.lock().await;
                                 let r = client
-                                    .read_file(&format!("{}/specs/roadmap.md", wd))
+                                    .read_file(&crate::domain::paths::roadmap_path(wd))
                                     .await
                                     .unwrap_or_else(|_| "(No roadmap.md)".into());
                                 let a = client
-                                    .read_file(&format!("{}/specs/architecture.md", wd))
+                                    .read_file(&crate::domain::paths::architecture_path(wd))
                                     .await
                                     .unwrap_or_else(|_| "(No architecture.md)".into());
 
@@ -988,51 +985,68 @@ impl ExecutionEngine {
 }
 
 fn clean_agent_thought(text: &str) -> String {
-    let mut cleaned = String::new();
 
-    // 1. Try to find ```thought ... ``` block
+
+    // 1. Try to find ```thought ... ``` block (Standard Chain-of-Thought)
     if let Some(start) = text.find("```thought") {
         let remainder = &text[start + 10..]; // Skip ```thought
         if let Some(end) = remainder.find("```") {
-             cleaned = remainder[..end].trim().to_string();
+             return remainder[..end].trim().to_string();
         }
-    } else {
+    }
 
-        // 2. Fallback to line filtering (legacy)
-        // We stop at the first code block (```) because that usually indicates a tool call
-        let mut lines = Vec::new();
-        for line in text.lines() {
-            let t = line.trim();
-            if t.starts_with("```") {
-                break; 
-            }
-            if !t.starts_with("Output:") 
-                && !t.starts_with("Compiling ")
-                && !t.starts_with("Finished ")
-                && !t.starts_with("Running ")
-                && !t.starts_with("Checking ") 
-                && !t.starts_with("Creating ") 
-                && !t.starts_with("error")     
-                && !t.starts_with("warning")   
-                && !t.starts_with("|")         
-                && !t.starts_with("=")         
-                && !t.starts_with("^^")         
-                && !t.starts_with("note:")     
-                && !t.starts_with("help:")     
-                && !t.starts_with("...")
-                && !t.is_empty() 
-            {
-                lines.push(line);
-            }
+    // 2. Fallback: Take everything BEFORE the first code block (```)
+    // This handles cases where the thought is just plain text before the tool call.
+    let pre_code = if let Some(idx) = text.find("```") {
+        &text[..idx]
+    } else {
+        text
+    };
+
+    // 3. Line Filtering
+    // Filter out "Output:", compiler logs, and empty lines.
+    let mut lines = Vec::new();
+    
+    for line in pre_code.lines() {
+        let t = line.trim();
+        
+        // Hallucinated "Output:" blocks handling
+        // If we see "Output:" on its own line or starting a line, stop capturing if it looks like tool output
+        if t.starts_with("Output:") {
+            // Check if what follows resembles tool output (or assume it is)
+            // Ideally tool output shouldn't be in the thought section.
+            // We'll skip this line and potentially subsequent lines if they look like logs?
+            // Safer strategy: Just skip this line.
+            continue; 
         }
-        cleaned = lines.join("\n");
+
+        // Standard Filter
+        if !t.starts_with("Compiling ")
+            && !t.starts_with("Finished ")
+            && !t.starts_with("Running ")
+            && !t.starts_with("Checking ") 
+            && !t.starts_with("Creating ") 
+            && !t.starts_with("error")     
+            && !t.starts_with("warning")   
+            && !t.starts_with("|")         
+            && !t.starts_with("=")         
+            && !t.starts_with("^^")         
+            && !t.starts_with("note:")     
+            && !t.starts_with("help:")     
+            && !t.starts_with("...")
+            && !t.is_empty() 
+        {
+            lines.push(line);
+        }
     }
     
-    // 3. Post-processing: Remove "thought" or "Agent:" labels
+    let cleaned = lines.join("\n");
+    
+    // 4. Post-processing: Remove "thought" or "Agent:" labels
     let mut trimmed = cleaned.trim();
     
     // Iteratively strip prefixes commonly used by LLMs (case-insensitive)
-    let prefixes = ["thought", "agent", ":"];
+    let prefixes = ["thought", "agent", ":", ">"];
     let mut changed = true;
     while changed {
         changed = false;
